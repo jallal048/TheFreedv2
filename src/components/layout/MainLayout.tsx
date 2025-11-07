@@ -1,7 +1,8 @@
-// Layout principal con botón de prueba de perfil público
+// Layout principal con botón de cerrar sesión y prueba de perfil público
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import TestProfileButton from '../TestProfileButton';
+import { useAuth } from '../../contexts/AuthContextSupabase';
 
 const NAV = [
   { label: 'Feed', icon: '🏠', path: '/feed' },
@@ -17,6 +18,7 @@ export const MainLayout: React.FC = () => {
   const [darkMode, setDarkMode] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   React.useEffect(() => {
     if (darkMode) {
@@ -29,6 +31,11 @@ export const MainLayout: React.FC = () => {
   const user = {
     name: 'Demo User',
     avatarUrl: '',
+  };
+
+  const onLogout = async () => {
+    await logout();
+    navigate('/login');
   };
 
   return (
@@ -61,6 +68,13 @@ export const MainLayout: React.FC = () => {
         >
           {darkMode ? '🌙' : '☀️'}
         </button>
+        <button
+          onClick={onLogout}
+          className="mb-6 mt-2 px-4 py-2 bg-red-500 text-white rounded-lg shadow hover:bg-red-700 transition-colors text-xs font-bold"
+          title="Cerrar sesión"
+        >
+          Cerrar sesión
+        </button>
       </aside>
       {/* Main content area + header sticky */}
       <div className="flex-1 ml-24">
@@ -90,7 +104,6 @@ export const MainLayout: React.FC = () => {
         <main className="mt-16 px-8 py-10 min-h-[calc(100vh-4rem)]">
           <Outlet />
         </main>
-        
         {/* Botón de prueba para ver perfil público */}
         <TestProfileButton />
       </div>
