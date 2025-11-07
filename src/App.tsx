@@ -1,4 +1,4 @@
-// App principal: añade feed a las rutas protegidas
+// App principal: incluye todas las rutas incluyendo descubrir usuarios
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContextSupabase';
@@ -12,6 +12,7 @@ const RegisterPage = React.lazy(() => import('./pages/auth/RegisterPage'));
 const DashboardPage = React.lazy(() => import('./pages/dashboard/DashboardPage'));
 const AdminPage = React.lazy(() => import('./pages/admin/AdminPage'));
 const DiscoveryPage = React.lazy(() => import('./pages/discovery/DiscoveryPage'));
+const DiscoverUsersPage = React.lazy(() => import('./pages/discovery/DiscoverUsersPage'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
 const CreatorProfilePage = React.lazy(() => import('./pages/creator/CreatorProfilePage'));
 const PublicProfilePage = React.lazy(() => import('./pages/public/PublicProfilePage'));
@@ -86,6 +87,16 @@ function App() {
                 }
               />
               <Route
+                path="/discover/users"
+                element={
+                  <Suspense fallback={<LoadingFallback />}>
+                    <ProtectedRoute>
+                      <DiscoverUsersPage />
+                    </ProtectedRoute>
+                  </Suspense>
+                }
+              />
+              <Route
                 path="/create"
                 element={
                   <Suspense fallback={<LoadingFallback />}>
@@ -135,7 +146,6 @@ function App() {
                   </Suspense>
                 }
               />
-              {/* Más rutas aquí */}
             </Route>
 
             {/* Rutas públicas fuera del layout principal */}
