@@ -1,11 +1,25 @@
-// Servicio de datos de prueba abundantes para TheFreed.v1
-// Datos realistas para que la aplicación cargue instantáneamente
-
+// Servicio de datos de prueba con UUIDs válidos para TheFreed.v2
 import { Content, Subscription, Notification, User } from '../types';
 
-// Usuarios mock
-export const mockUsers: User[] = Array.from({ length: 50 }, (_, i) => ({
-  id: `user_${i + 1}`,
+// Generar UUID v4 compatible
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback para entornos sin crypto.randomUUID
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+// Pre-generar UUIDs para usuarios para mantener consistencia
+const userUUIDs = Array.from({ length: 50 }, () => generateUUID());
+
+// Usuarios mock con UUIDs reales
+export const mockUsers: User[] = userUUIDs.map((uuid, i) => ({
+  id: uuid,
   email: `usuario${i + 1}@example.com`,
   username: `usuario${i + 1}`,
   firstName: `Usuario`,
@@ -18,8 +32,8 @@ export const mockUsers: User[] = Array.from({ length: 50 }, (_, i) => ({
   createdAt: new Date(2023, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1).toISOString(),
   lastActive: new Date(2024, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1).toISOString(),
   profile: i % 5 === 0 ? {
-    id: `profile_${i + 1}`,
-    userId: `user_${i + 1}`,
+    id: generateUUID(),
+    userId: uuid,
     displayName: `Usuario ${i + 1}`,
     bio: `Bio del usuario ${i + 1}. Creo contenido increíble sobre lifestyle y fitness.`,
     avatarUrl: `https://images.unsplash.com/photo-${1500000000000 + i}?w=150&h=150&fit=crop&crop=face`,
@@ -51,7 +65,7 @@ export const mockUsers: User[] = Array.from({ length: 50 }, (_, i) => ({
   } : undefined
 }));
 
-// Contenido mock abundante
+// Contenido mock con UUIDs
 const contentTypes = ['VIDEO', 'IMAGE', 'TEXT', 'AUDIO', 'LIVESTREAM'] as const;
 const categories = ['lifestyle', 'fitness', 'cooking', 'music', 'art', 'travel', 'tech', 'beauty', 'fashion', 'photography', 'business', 'education'];
 const tags = ['viral', 'trending', 'new', 'popular', 'premium', 'exclusive', 'tutorial', 'review', 'behind-the-scenes', 'daily', 'weekly', 'monthly'];
@@ -64,7 +78,7 @@ export const mockContent: Content[] = Array.from({ length: 200 }, (_, i) => {
   const creator = mockUsers[creatorIndex];
   
   return {
-    id: `content_${i + 1}`,
+    id: generateUUID(),
     creatorId: creator.id,
     title: `${category.charAt(0).toUpperCase() + category.slice(1)} Content #${i + 1}`,
     description: `Contenido increíble de ${category} creado por mi comunidad. Descubre los mejores tips, tutoriales y contenido exclusivo que te ayudará a crecer y aprender cada día.`,
@@ -74,13 +88,13 @@ export const mockContent: Content[] = Array.from({ length: 200 }, (_, i) => {
     mediaUrl: `https://images.unsplash.com/photo-${2000000000000 + i}?w=800&h=600&fit=crop`,
     thumbnailUrl: `https://images.unsplash.com/photo-${2000000000000 + i}?w=400&h=300&fit=crop`,
     duration: contentType === 'VIDEO' || contentType === 'AUDIO' ? Math.floor(Math.random() * 600) + 60 : undefined,
-    fileSize: Math.floor(Math.random() * 100000000) + 1000000, // 1MB to 100MB
+    fileSize: Math.floor(Math.random() * 100000000) + 1000000,
     isPremium: Math.random() > 0.7,
     isFree: Math.random() > 0.3,
-    price: Math.floor(Math.random() * 50) + 5, // $5 to $54
+    price: Math.floor(Math.random() * 50) + 5,
     isPrivate: Math.random() > 0.8,
     isArchived: Math.random() > 0.9,
-    isNSFW: category === 'beauty' || category === 'fashion',
+    isNsfw: category === 'beauty' || category === 'fashion',
     ageRestriction: Math.random() > 0.8 ? 18 : undefined,
     currency: 'USD',
     views: Math.floor(Math.random() * 50000) + 100,
@@ -109,24 +123,25 @@ const subscriptionStatus = ['ACTIVE', 'CANCELLED', 'EXPIRED', 'PAUSED'] as const
 
 export const mockSubscriptions: Subscription[] = Array.from({ length: 150 }, (_, i) => {
   const creator = mockUsers[Math.floor(Math.random() * mockUsers.length)];
+  const subscriber = mockUsers[Math.floor(Math.random() * mockUsers.length)];
   const createdAt = new Date(2024, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1);
   const startDate = createdAt.toISOString();
   const endDate = Math.random() > 0.7 ? new Date(createdAt.getTime() + (Math.random() * 365 + 30) * 24 * 60 * 60 * 1000).toISOString() : undefined;
   const status = endDate && new Date(endDate) < new Date() ? 'EXPIRED' : subscriptionStatus[Math.floor(Math.random() * subscriptionStatus.length)];
   
   return {
-    id: `subscription_${i + 1}`,
-    subscriberId: `user_${Math.floor(Math.random() * 30) + 1}`,
+    id: generateUUID(),
+    subscriberId: subscriber.id,
     creatorId: creator.id,
     subscriptionType: subscriptionTypes[Math.floor(Math.random() * subscriptionTypes.length)],
-    price: Math.floor(Math.random() * 50) + 10, // $10 to $59
+    price: Math.floor(Math.random() * 50) + 10,
     currency: 'USD',
     isActive: status === 'ACTIVE',
     startDate: startDate,
     endDate: endDate,
     autoRenew: Math.random() > 0.3,
     paymentMethod: 'credit_card',
-    transactionId: `txn_${i + 1}`,
+    transactionId: generateUUID(),
     status: status as 'ACTIVE' | 'CANCELLED' | 'EXPIRED' | 'PAUSED',
     createdAt: createdAt.toISOString(),
     updatedAt: createdAt.toISOString(),
@@ -150,8 +165,9 @@ const notificationTypes = ['NEW_FOLLOWER', 'NEW_MESSAGE', 'NEW_CONTENT', 'PAYMEN
 
 export const mockNotifications: Notification[] = Array.from({ length: 100 }, (_, i) => {
   const type = notificationTypes[Math.floor(Math.random() * notificationTypes.length)];
+  const user = mockUsers[Math.floor(Math.random() * mockUsers.length)];
   const createdAt = new Date(2024, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1, Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
-  const isRead = Math.random() > 0.4; // 60% read rate
+  const isRead = Math.random() > 0.4;
   
   let title = '';
   let content = '';
@@ -160,18 +176,18 @@ export const mockNotifications: Notification[] = Array.from({ length: 100 }, (_,
   switch (type) {
     case 'NEW_FOLLOWER':
       title = 'Nuevo seguidor';
-      content = `Usuario${Math.floor(Math.random() * 50) + 1} comenzó a seguirte`;
-      data = { userId: `user_${Math.floor(Math.random() * 50) + 1}` };
+      content = `${mockUsers[Math.floor(Math.random() * mockUsers.length)].username} comenzó a seguirte`;
+      data = { userId: mockUsers[Math.floor(Math.random() * mockUsers.length)].id };
       break;
     case 'NEW_MESSAGE':
       title = 'Nuevo mensaje';
-      content = `Usuario${Math.floor(Math.random() * 50) + 1} te envió un mensaje`;
-      data = { messageId: `message_${i + 1}` };
+      content = `${mockUsers[Math.floor(Math.random() * mockUsers.length)].username} te envió un mensaje`;
+      data = { messageId: generateUUID() };
       break;
     case 'NEW_CONTENT':
       title = 'Contenido publicado';
       content = 'Tu contenido ha sido aprobado y publicado exitosamente';
-      data = { contentId: `content_${Math.floor(Math.random() * 200) + 1}` };
+      data = { contentId: mockContent[Math.floor(Math.random() * mockContent.length)]?.id || generateUUID() };
       break;
     case 'PAYMENT_RECEIVED':
       title = 'Pago recibido';
@@ -181,12 +197,12 @@ export const mockNotifications: Notification[] = Array.from({ length: 100 }, (_,
     case 'SUBSCRIPTION_RENEWED':
       title = 'Suscripción renovada';
       content = 'Tu suscripción ha sido renovada exitosamente';
-      data = { subscriptionId: `subscription_${Math.floor(Math.random() * 150) + 1}` };
+      data = { subscriptionId: mockSubscriptions[Math.floor(Math.random() * mockSubscriptions.length)]?.id || generateUUID() };
       break;
     case 'DISPUTE_UPDATE':
       title = 'Actualización de disputa';
       content = 'Hay una actualización en una de tus disputas';
-      data = { disputeId: `dispute_${i + 1}` };
+      data = { disputeId: generateUUID() };
       break;
     case 'SYSTEM_ALERT':
       title = 'Alerta del sistema';
@@ -196,13 +212,13 @@ export const mockNotifications: Notification[] = Array.from({ length: 100 }, (_,
     case 'PROMOTION':
       title = 'Nueva promoción';
       content = 'Descubre las nuevas promociones disponibles para creadores';
-      data = { promotionId: `promo_${i + 1}` };
+      data = { promotionId: generateUUID() };
       break;
   }
   
   return {
-    id: `notification_${i + 1}`,
-    userId: `user_${Math.floor(Math.random() * 30) + 1}`,
+    id: generateUUID(),
+    userId: user.id,
     type: type,
     title: title,
     content: content,
@@ -212,7 +228,7 @@ export const mockNotifications: Notification[] = Array.from({ length: 100 }, (_,
   };
 });
 
-// Función para obtener datos de contenido con paginación
+// Funciones auxiliares (sin cambios, solo para referencia)
 export const getMockContent = (params?: { page?: number; limit?: number; category?: string; contentType?: string; search?: string }) => {
   const page = params?.page || 1;
   const limit = params?.limit || 20;
@@ -249,7 +265,6 @@ export const getMockContent = (params?: { page?: number; limit?: number; categor
   };
 };
 
-// Función para obtener suscripciones con paginación
 export const getMockSubscriptions = (params?: { page?: number; limit?: number; status?: string; creatorId?: string }) => {
   const page = params?.page || 1;
   const limit = params?.limit || 20;
@@ -277,7 +292,6 @@ export const getMockSubscriptions = (params?: { page?: number; limit?: number; s
   };
 };
 
-// Función para obtener notificaciones con paginación
 export const getMockNotifications = (params?: { page?: number; limit?: number; search?: string }) => {
   const page = params?.page || 1;
   const limit = params?.limit || 20;
@@ -290,7 +304,7 @@ export const getMockNotifications = (params?: { page?: number; limit?: number; s
     const searchLower = params.search.toLowerCase();
     filteredNotifications = filteredNotifications.filter(notification => 
       notification.title.toLowerCase().includes(searchLower) ||
-      notification.message.toLowerCase().includes(searchLower)
+      notification.content.toLowerCase().includes(searchLower)
     );
   }
   
@@ -305,32 +319,29 @@ export const getMockNotifications = (params?: { page?: number; limit?: number; s
   };
 };
 
-// Función para obtener estadísticas rápidas
 export const getMockStats = () => {
   return {
     totalContent: mockContent.length,
     totalSubscriptions: mockSubscriptions.length,
     totalNotifications: mockNotifications.length,
     totalUsers: mockUsers.length,
-    totalLikes: mockContent.reduce((sum, content) => sum + content.likesCount, 0),
-    totalViews: mockContent.reduce((sum, content) => sum + content.viewsCount, 0),
+    totalLikes: mockContent.reduce((sum, content) => sum + (content.likesCount || 0), 0),
+    totalViews: mockContent.reduce((sum, content) => sum + (content.views || 0), 0),
     totalRevenue: mockSubscriptions.reduce((sum, sub) => sum + sub.price, 0),
   };
 };
 
-// Función para simular delay de red (opcional para testing)
 export const simulateNetworkDelay = (ms: number = 100) => {
   return new Promise(resolve => setTimeout(resolve, ms));
 };
 
-// Función para obtener recomendaciones mock
-export const getMockRecommendations = (params: { limit?: number } = {}) => {
+export const getMockRecommendations = (params: { limit?: number; refresh?: boolean } = {}) => {
   const limit = params.limit || 10;
   const recommendations = mockContent.slice(0, limit).map((content, index) => ({
-    id: `rec_${index + 1}`,
+    id: generateUUID(),
     content,
     score: Math.random() * 100,
-    reason: ['similar_content', 'followed_creator', 'trending', 'personalized'][Math.floor(Math.random() * 4)] as any,
+    reason: ['similar_content', 'followed_creator', 'trending', 'personalized', 'cold_start'][Math.floor(Math.random() * 5)] as any,
     confidence: Math.random() * 100,
     metadata: {
       matchedTags: content.tags?.slice(0, 2) || [],
@@ -351,12 +362,11 @@ export const getMockRecommendations = (params: { limit?: number } = {}) => {
   };
 };
 
-// Función para obtener contenido trending mock
 export const getMockTrendingContent = () => {
   const trending = mockContent
-    .sort((a, b) => (b.viewsCount || 0) - (a.viewsCount || 0))
+    .sort((a, b) => (b.views || 0) - (a.views || 0))
     .slice(0, 20)
-    .map((content, index) => ({
+    .map((content) => ({
       contentId: content.id,
       trendScore: Math.random() * 100,
       views24h: Math.floor(Math.random() * 10000) + 1000,
@@ -376,7 +386,6 @@ export const getMockTrendingContent = () => {
   };
 };
 
-// Función para obtener contenido discover mock
 export const getMockDiscoverContent = (params: any = {}) => {
   const page = params.page || 1;
   const limit = params.limit || 20;
@@ -385,7 +394,6 @@ export const getMockDiscoverContent = (params: any = {}) => {
   
   const discoverContent = mockContent.slice(startIndex, endIndex).map(content => ({
     ...content,
-    // Agregar datos específicos de discover
     discoverScore: Math.random() * 100,
     isSuggested: Math.random() > 0.7,
     reason: ['trending', 'similar_to_interest', 'new_creator', 'popular_in_community'][Math.floor(Math.random() * 4)]
@@ -403,13 +411,12 @@ export const getMockDiscoverContent = (params: any = {}) => {
   };
 };
 
-// Función para track de analytics mock
 export const trackMockAnalytics = (event: string) => {
   return {
     success: true,
     data: {
       tracked: true,
-      eventId: `mock-event-${Date.now()}`,
+      eventId: generateUUID(),
       timestamp: new Date().toISOString()
     },
     timestamp: new Date().toISOString()
