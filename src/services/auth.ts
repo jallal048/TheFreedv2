@@ -100,4 +100,55 @@ export class AuthService {
     }
   }
 
-  // ... resto igual ...
+  // Mapear usuario de Supabase a nuestro tipo User
+  static mapSupabaseUser(supabaseUser: any): User {
+    return {
+      id: supabaseUser.id,
+      email: supabaseUser.email || '',
+      username: supabaseUser.user_metadata?.username || '',
+      firstName: supabaseUser.user_metadata?.firstName || '',
+      lastName: supabaseUser.user_metadata?.lastName || '',
+      userType: 'USER' as any,
+      isEmailVerified: supabaseUser.email_confirmed_at ? true : false,
+      isPhoneVerified: false,
+      isActive: true,
+      isSuspended: false,
+      createdAt: supabaseUser.created_at,
+      lastActive: new Date().toISOString(),
+      profile: {
+        id: `profile_${supabaseUser.id}`,
+        userId: supabaseUser.id,
+        displayName: supabaseUser.user_metadata?.displayName || 
+                     `${supabaseUser.user_metadata?.firstName || ''} ${supabaseUser.user_metadata?.lastName || ''}`.trim() ||
+                     'Usuario',
+        bio: supabaseUser.user_metadata?.bio || '',
+        avatarUrl: supabaseUser.user_metadata?.avatarUrl || '',
+        bannerUrl: supabaseUser.user_metadata?.bannerUrl || '',
+        website: supabaseUser.user_metadata?.website || '',
+        socialLinks: {
+          twitter: supabaseUser.user_metadata?.socialLinks?.twitter || '',
+          instagram: supabaseUser.user_metadata?.socialLinks?.instagram || '',
+          youtube: supabaseUser.user_metadata?.socialLinks?.youtube || ''
+        },
+        categories: ['general'],
+        contentTypes: ['TEXT', 'IMAGE', 'VIDEO'],
+        isVerified: false,
+        verificationLevel: 'BASIC',
+        isLiveStreaming: false,
+        isAdultContent: false,
+        monthlyPrice: 0,
+        yearlyPrice: 0,
+        customPrice: 0,
+        commissionRate: 15,
+        isPublic: true,
+        isActive: true,
+        followerCount: 0,
+        totalViews: 0,
+        totalEarnings: 0,
+        totalContent: 0,
+        createdAt: supabaseUser.created_at,
+        updatedAt: new Date().toISOString()
+      }
+    };
+  }
+}
