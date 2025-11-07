@@ -1,36 +1,40 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/services/supabase';
 import { formatRelativeTime, formatCompactNumber } from '@/utils/formatters';
 
-const FeedCard = ({ post }) => (
-  <article className="bg-white dark:bg-gray-950 rounded-xl shadow-md flex flex-row gap-4 overflow-hidden hover:shadow-xl transition-shadow duration-300 items-center mb-6">
-    {post.media_url ? (
-      <img src={post.media_url} alt={post.title} className="w-32 h-32 object-cover shrink-0" />
-    ) : (
-      <div className="w-32 h-32 bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-3xl text-gray-400 dark:text-gray-600 shrink-0">Sin imagen</div>
-    )}
-    <div className="flex flex-col gap-1 flex-1 p-3 min-w-0">
-      <div className="flex items-center gap-3 mb-1">
-        {post.profile_avatar_url ? (
-          <img src={post.profile_avatar_url} alt={post.author} className="h-9 w-9 rounded-full border border-blue-400" />
-        ) : (
-          <div className="h-9 w-9 bg-gray-300 dark:bg-gray-700 rounded-full flex items-center justify-center font-bold text-base text-gray-500 dark:text-gray-300">{post.author?.slice(0,2)?.toUpperCase()}</div>
-        )}
-        <span className="font-medium text-gray-700 dark:text-gray-100 text-sm truncate">{post.author}</span>
-        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(post.created_at)}</span>
+const FeedCard = ({ post }) => {
+  const navigate = useNavigate();
+  return (
+    <article onClick={() => navigate(`/public/${post.author_id}`)}
+      className="bg-white dark:bg-gray-950 rounded-xl shadow-md flex flex-row gap-4 overflow-hidden hover:shadow-xl transition-shadow duration-300 items-center mb-6 cursor-pointer">
+      {post.media_url ? (
+        <img src={post.media_url} alt={post.title} className="w-32 h-32 object-cover shrink-0" />
+      ) : (
+        <div className="w-32 h-32 bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-3xl text-gray-400 dark:text-gray-600 shrink-0">Sin imagen</div>
+      )}
+      <div className="flex flex-col gap-1 flex-1 p-3 min-w-0">
+        <div className="flex items-center gap-3 mb-1">
+          {post.profile_avatar_url ? (
+            <img src={post.profile_avatar_url} alt={post.author} className="h-9 w-9 rounded-full border border-blue-400" />
+          ) : (
+            <div className="h-9 w-9 bg-gray-300 dark:bg-gray-700 rounded-full flex items-center justify-center font-bold text-base text-gray-500 dark:text-gray-300">{post.author?.slice(0,2)?.toUpperCase()}</div>
+          )}
+          <span className="font-medium text-gray-700 dark:text-gray-100 text-sm truncate">{post.author}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(post.created_at)}</span>
+        </div>
+        <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100 truncate">{post.title}</h2>
+        {post.description && <p className="text-gray-600 dark:text-gray-400 text-xs line-clamp-3 whitespace-pre-wrap">{post.description}</p>}
+        <div className="flex items-center gap-5 mt-1">
+          <span className="text-blue-600 dark:text-blue-300 font-bold text-xs">{formatCompactNumber(post.views || 0)} vistas</span>
+          <span className="text-gray-500 dark:text-gray-400 text-xs">{formatCompactNumber(post.likes_count || 0)} likes</span>
+        </div>
       </div>
-      <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100 truncate">{post.title}</h2>
-      {post.description && <p className="text-gray-600 dark:text-gray-400 text-xs line-clamp-3 whitespace-pre-wrap">{post.description}</p>}
-      <div className="flex items-center gap-5 mt-1">
-        <span className="text-blue-600 dark:text-blue-300 font-bold text-xs">{formatCompactNumber(post.views || 0)} vistas</span>
-        <span className="text-gray-500 dark:text-gray-400 text-xs">{formatCompactNumber(post.likes_count || 0)} likes</span>
-      </div>
-    </div>
-  </article>
-);
+    </article>
+  );
+};
 
 async function getSupabaseUser() {
-  // Soporte para v2 y v1 de Supabase Auth
   if (supabase.auth.getUser) {
     const { data } = await supabase.auth.getUser();
     return data?.user || null;
@@ -88,7 +92,6 @@ export default function FeedPage() {
           (err && err.message ? `\n(${err.message})` : '')
         );
         setLoading(false);
-        // Debug: imprime error real en consola
         // eslint-disable-next-line
         console.error('Feed error:', err);
       }
