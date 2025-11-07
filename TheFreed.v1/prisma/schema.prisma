@@ -1,0 +1,760 @@
+// Prisma schema para TheFreed.v1
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ==================== MODELOS PRINCIPALES ====================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  username      String   @unique
+  password      String
+  firstName     String
+  lastName      String
+  dateOfBirth   DateTime?
+  gender        Gender?
+  phone         String?
+  country       String?
+  city          String?
+  timezone      String?
+  isEmailVerified Boolean @default(false)
+  isPhoneVerified Boolean @default(false)
+  isActive      Boolean  @default(true)
+  isSuspended   Boolean  @default(false)
+  suspensionReason String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastActive    DateTime @default(now())
+  userType      UserType @default(CONSUMER)
+  
+  // Relaciones
+  profile           CreatorProfile?
+  subscriptions     Subscription[]
+  sentMessages      Message[] @relation("MessageSender")
+  receivedMessages  Message[] @relation("MessageReceiver")
+  comments          Comment[]
+  likes             Like[]
+  userFollowers     Follow[] @relation("Follower")
+  userFollowing     Follow[] @relation("Following")
+  notifications     Notification[]
+  payments          Payment[]
+  transactions      Transaction[]
+  disputes          Dispute[]
+  reports           Report[]
+  referralCode      ReferralCode?
+  referredUsers     User[] @relation("ReferredUsers")
+  referredBy        User?  @relation("ReferredUsers", fields: [referredById], references: [id])
+  referredById      String?
+  badges            UserBadge[]
+  settings          UserSettings?
+  auditLogs         AuditLog[]
+  earnings          Earnings[]
+  kyc              KYC?
+  account          Account?
+  taxInfo          TaxInfo?
+  content          Content[]
+  
+  @@map("users")
+}
+
+model CreatorProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  displayName     String
+  bio             String?
+  avatarUrl       String?
+  bannerUrl       String?
+  website         String?
+  socialLinks     Json?    // URLs de redes sociales
+  categories      Json?    // Categorías de contenido
+  contentTypes    Json?    // Tipos de contenido
+  isVerified      Boolean  @default(false)
+  verificationLevel VerificationLevel @default(BASIC)
+  isLiveStreaming Boolean  @default(false)
+  isAdultContent  Boolean  @default(false)
+  monthlyPrice    Float?
+  yearlyPrice     Float?
+  customPrice     Float?
+  commissionRate  Float    @default(0.10)
+  isPublic        Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  followerCount   Int      @default(0)
+  totalViews      Int      @default(0)
+  totalEarnings   Float    @default(0)
+  totalContent    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         Content[]
+  analytics       Analytics[]
+  
+  @@map("creator_profiles")
+}
+
+model Content {
+  id            String       @id @default(cuid())
+  creatorId     String
+  title         String
+  description   String?
+  contentType   ContentType
+  category      String
+  tags          Json?
+  mediaUrl      String?
+  thumbnailUrl  String?
+  duration      Int?         // en segundos
+  fileSize      BigInt?      // en bytes
+  isPremium     Boolean      @default(false)
+  isFree        Boolean      @default(false)
+  price         Float?
+  isPrivate     Boolean      @default(false)
+  isArchived    Boolean      @default(false)
+  isNSFW        Boolean      @default(false)
+  ageRestriction Int?        // edad mínima
+  currency      String       @default("USD")
+  views         Int          @default(0)
+  likesCount    Int          @default(0)
+  downloads     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  publishedAt   DateTime?
+  
+  creator       User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  profile       CreatorProfile @relation(fields: [creatorId], references: [userId])
+  comments      Comment[]
+  likes         Like[]
+  transactions  Transaction[]
+  analytics     Analytics[]
+  
+  @@map("content")
+}
+
+model Subscription {
+  id              String            @id @default(cuid())
+  subscriberId    String
+  creatorId       String
+  subscriptionType SubscriptionType @default(MONTHLY)
+  price           Float
+  currency        String            @default("USD")
+  isActive        Boolean           @default(true)
+  startDate       DateTime          @default(now())
+  endDate         DateTime?
+  autoRenew       Boolean           @default(true)
+  paymentMethod   String?           // ID del método de pago
+  transactionId   String?
+  status          SubscriptionStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  subscriber      User              @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  
+  @@unique([subscriberId, creatorId])
+  @@map("subscriptions")
+}
+
+model Message {
+  id         String      @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  messageType MessageType @default(TEXT)
+  mediaUrl   String?
+  isRead     Boolean     @default(false)
+  isDeleted  Boolean     @default(false)
+  parentId   String?     // Para respuestas en hilo
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  
+  sender     User        @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User        @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  parent     Message?    @relation("MessageReplies", fields: [parentId], references: [id])
+  replies    Message[]   @relation("MessageReplies")
+  
+  @@map("messages")
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  userId    String
+  contentId String
+  text      String
+  parentId  String?   // Para respuestas en hilo
+  isDeleted Boolean   @default(false)
+  likesCount Int      @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   Content   @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  likes     Like[]
+  
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  contentId String?
+  commentId String?
+  type      LikeType
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   Content? @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, contentId])
+  @@unique([userId, commentId])
+  @@map("likes")
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  followerId String
+  followingId String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  
+  follower   User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following  User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  content   String
+  data      Json?            // Datos adicionales
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+// ==================== MODELOS FINANCIEROS ====================
+
+model Payment {
+  id            String        @id @default(cuid())
+  userId        String
+  amount        Float
+  currency      String        @default("USD")
+  paymentMethod String        // ID del método de pago
+  status        PaymentStatus @default(PENDING)
+  gateway       PaymentGateway
+  gatewayTransactionId String?
+  failureReason String?
+  processedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+  
+  @@map("payments")
+}
+
+model Transaction {
+  id              String           @id @default(cuid())
+  userId          String
+  paymentId       String?
+  subscriptionId  String?
+  contentId       String?
+  type            TransactionType
+  amount          Float
+  currency        String           @default("USD")
+  fee             Float            @default(0)
+  netAmount       Float
+  status          TransactionStatus @default(PENDING)
+  description     String?
+  createdAt       DateTime         @default(now())
+  
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payment         Payment?         @relation(fields: [paymentId], references: [id])
+  subscription    Subscription?    @relation(fields: [subscriptionId], references: [id])
+  content         Content?         @relation(fields: [contentId], references: [id])
+  
+  @@map("transactions")
+}
+
+model Earnings {
+  id            String   @id @default(cuid())
+  userId        String
+  amount        Float
+  currency      String   @default("USD")
+  type          EarningsType
+  description   String?
+  status        EarningsStatus @default(PENDING)
+  processedAt   DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime @default(now())
+  
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("earnings")
+}
+
+model Dispute {
+  id            String        @id @default(cuid())
+  userId        String
+  type          DisputeType
+  status        DisputeStatus @default(OPEN)
+  amount        Float
+  currency      String        @default("USD")
+  reason        String
+  evidence      Json?         // Evidencias adjuntas
+  adminResponse String?
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("disputes")
+}
+
+// ==================== MODELOS DE CUMPLIMIENTO ====================
+
+model KYC {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  status            KYCStatus @default(PENDING)
+  documentType      String?
+  documentNumber    String?
+  documentFrontUrl  String?
+  documentBackUrl   String?
+  selfieUrl         String?
+  addressProofUrl   String?
+  verificationNotes String?
+  verifiedAt        DateTime?
+  verifiedBy        String?   // ID del admin que verificó
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("kyc")
+}
+
+model TaxInfo {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  taxNumber        String?
+  taxCountry       String?
+  taxAddress       String?
+  taxType          TaxType?
+  isW9Completed    Boolean   @default(false)
+  isW8BENCompleted Boolean   @default(false)
+  documents        Json?     // URLs de documentos fiscales
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("tax_info")
+}
+
+model Account {
+  id              String       @id @default(cuid())
+  userId          String       @unique
+  accountType     AccountType  @default(STRIPE)
+  accountNumber   String?      // Últimos 4 dígitos
+  bankName        String?
+  accountHolder   String?
+  routingNumber   String?
+  iban            String?
+  swift           String?
+  currency        String       @default("USD")
+  isVerified      Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("accounts")
+}
+
+// ==================== MODELOS DE MODERACIÓN ====================
+
+model Report {
+  id          String      @id @default(cuid())
+  reporterId  String
+  targetType  ReportTarget
+  targetId    String
+  reason      String
+  description String?
+  status      ReportStatus @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  resolution  String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  reporter    User        @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  
+  @@map("reports")
+}
+
+model Moderation {
+  id          String          @id @default(cuid())
+  targetType  ModerationTarget
+  targetId    String
+  action      ModerationAction
+  reason      String
+  duration    Int?            // en horas, null = permanente
+  status      ModerationStatus @default(ACTIVE)
+  createdBy   String          // ID del admin
+  createdAt   DateTime        @default(now())
+  expiresAt   DateTime?
+  
+  @@map("moderation")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  resource    String
+  resourceId  String?
+  changes     Json?    // Cambios realizados
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  user        User?    @relation(fields: [userId], references: [id])
+  
+  @@map("audit_logs")
+}
+
+// ==================== MODELOS DE GAMIFICACIÓN ====================
+
+model Badge {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  description String
+  icon        String
+  criteria    Json        // Criterios para obtener la insignia
+  rarity      BadgeRarity @default(COMMON)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  
+  users       UserBadge[]
+  
+  @@map("badges")
+}
+
+model UserBadge {
+  id        String   @id @default(cuid())
+  userId    String
+  badgeId   String
+  earnedAt  DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, badgeId])
+  @@map("user_badges")
+}
+
+// ==================== MODELOS DE SISTEMA ====================
+
+model UserSettings {
+  id                String  @id @default(cuid())
+  userId            String  @unique
+  language          String  @default("es")
+  timezone          String  @default("UTC")
+  emailNotifications Boolean @default(true)
+  pushNotifications  Boolean @default(true)
+  smsNotifications   Boolean @default(false)
+  privacyLevel      PrivacyLevel @default(PUBLIC)
+  contentVisibility ContentVisibility @default(ALL)
+  autoLike          Boolean @default(false)
+  darkMode          Boolean @default(false)
+  currency          String  @default("USD")
+  twoFactorEnabled  Boolean @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_settings")
+}
+
+model Analytics {
+  id          String      @id @default(cuid())
+  creatorId   String?
+  contentId   String?
+  type        AnalyticsType
+  date        DateTime
+  views       Int         @default(0)
+  likes       Int         @default(0)
+  comments    Int         @default(0)
+  shares      Int         @default(0)
+  revenue     Float       @default(0)
+  metadata    Json?       // Datos adicionales
+  
+  creator     CreatorProfile? @relation(fields: [creatorId], references: [userId])
+  content     Content?         @relation(fields: [contentId], references: [id])
+  
+  @@unique([creatorId, contentId, type, date])
+  @@map("analytics")
+}
+
+model ReferralCode {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  code          String   @unique
+  isActive      Boolean  @default(true)
+  usageCount    Int      @default(0)
+  maxUsage      Int?
+  rewardAmount  Float    @default(10)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("referral_codes")
+}
+
+// ==================== ENUMS ====================
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum UserType {
+  CONSUMER
+  CREATOR
+  ADMIN
+  MODERATOR
+}
+
+enum VerificationLevel {
+  NONE
+  BASIC
+  VERIFIED
+  PREMIUM
+}
+
+enum ContentType {
+  VIDEO
+  AUDIO
+  IMAGE
+  TEXT
+  LIVESTREAM
+  GALLERY
+  DOCUMENT
+}
+
+enum SubscriptionType {
+  MONTHLY
+  YEARLY
+  LIFETIME
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAUSED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+}
+
+enum LikeType {
+  LIKE
+  LOVE
+  LAUGH
+  ANGRY
+  SAD
+  WOW
+}
+
+enum NotificationType {
+  NEW_FOLLOWER
+  NEW_MESSAGE
+  NEW_CONTENT
+  PAYMENT_RECEIVED
+  SUBSCRIPTION_RENEWED
+  DISPUTE_UPDATE
+  SYSTEM_ALERT
+  PROMOTION
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentGateway {
+  STRIPE
+  PAYPAL
+  BANK_TRANSFER
+  CRYPTO
+  OTHER
+}
+
+enum TransactionType {
+  SUBSCRIPTION
+  CONTENT_PURCHASE
+  TIP
+  REFUND
+  COMMISSION
+  WITHDRAWAL
+  REFERRAL_BONUS
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum EarningsType {
+  SUBSCRIPTION
+  CONTENT_SALE
+  TIP
+  COMMISSION
+  REFERRAL
+  REFUND
+}
+
+enum EarningsStatus {
+  PENDING
+  PROCESSING
+  PAID
+  CANCELLED
+}
+
+enum DisputeType {
+  PAYMENT_ISSUE
+  CONTENT_ISSUE
+  ACCOUNT_ISSUE
+  FRAUD
+  COPYRIGHT
+  HARASSMENT
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  ESCALATED
+  CLOSED
+}
+
+enum KYCStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum TaxType {
+  INDIVIDUAL
+  BUSINESS
+  NON_PROFIT
+  GOVERNMENT
+}
+
+enum AccountType {
+  STRIPE
+  PAYPAL
+  BANK_TRANSFER
+  CRYPTO_WALLET
+}
+
+enum ReportTarget {
+  USER
+  CONTENT
+  COMMENT
+  MESSAGE
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  REJECTED
+}
+
+enum ModerationTarget {
+  USER
+  CONTENT
+  COMMENT
+  MESSAGE
+}
+
+enum ModerationAction {
+  WARN
+  SUSPEND
+  BAN
+  REMOVE_CONTENT
+  RESTRICT_ACCOUNT
+}
+
+enum ModerationStatus {
+  ACTIVE
+  EXPIRED
+  LIFTED
+}
+
+enum BadgeRarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+enum PrivacyLevel {
+  PUBLIC
+  FRIENDS
+  PRIVATE
+}
+
+enum ContentVisibility {
+  ALL
+  SUBSCRIBERS
+  PREMIUM
+  PRIVATE
+}
+
+enum AnalyticsType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}

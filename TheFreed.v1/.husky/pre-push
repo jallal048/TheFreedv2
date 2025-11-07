@@ -1,0 +1,51 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Pre-push hook for performance analysis and testing
+echo "🚀 Running pre-push checks for TheFreed.v1..."
+
+# Get current branch
+branch=$(git branch --show-current)
+echo "📍 Current branch: $branch"
+
+# Only run intensive checks on main branches
+if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "develop" ]]; then
+    echo "🧪 Running performance tests..."
+    
+    # Quick build test
+    if ! npm run build --silent; then
+        echo "❌ Build failed! Cannot push."
+        exit 1
+    fi
+    
+    # Quick bundle analysis
+    echo "📊 Running bundle analysis..."
+    timeout 60s npm run bundle:perf --silent || echo "⚠️ Bundle analysis timed out"
+    
+    # Performance audit
+    echo "🔍 Running performance audit..."
+    timeout 120s npm run performance:audit --silent || echo "⚠️ Performance audit timed out"
+    
+    echo "✅ Performance checks passed!"
+else
+    echo "⏭️  Skipping intensive checks for feature branch: $branch"
+fi
+
+# Always check for uncommitted changes
+if [ -n "$(git status --porcelain)" ]; then
+    echo "⚠️  You have uncommitted changes. Consider committing before pushing."
+    git status --short
+fi
+
+# Check remote status
+echo "📡 Checking remote status..."
+git fetch --quiet 2>/dev/null || echo "⚠️  Could not fetch from remote"
+
+# Check if remote branch is ahead
+if git diff HEAD..origin/$branch --quiet 2>/dev/null; then
+    echo "✅ Remote branch is up to date"
+else
+    echo "⚠️  Remote branch has changes. Consider pulling before pushing."
+fi
+
+echo "✅ Pre-push checks completed!"

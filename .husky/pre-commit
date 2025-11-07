@@ -1,0 +1,48 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Pre-commit hook para TheFreed.v1
+# Incluye linting, análisis de rendimiento y validaciones
+
+echo "🔍 Running pre-commit checks for TheFreed.v1..."
+
+# Ejecutar lint-staged
+npx lint-staged
+
+# Verificar que no hay archivos no trackeados importantes
+if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "⚠️  Warning: You have untracked files. Consider adding them to .gitignore"
+    git status --porcelain | grep "^??" | head -5
+fi
+
+# Verificar tamaño de archivos comprometidos
+echo "📊 Checking file sizes..."
+find . -name "*.js" -o -name "*.ts" -o -name "*.tsx" | while read file; do
+    size=$(wc -c < "$file" 2>/dev/null || echo 0)
+    if [ "$size" -gt 1048576 ]; then  # 1MB
+        echo "❌ Large file detected: $file ($(numfmt --to=iec $size))"
+        exit 1
+    fi
+done
+
+# Verificar que no hay credenciales accidentalmente comprometidas
+echo "🔒 Checking for potential secrets..."
+if grep -r "password\|secret\|key\|token" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" src/ | grep -v "process.env" | grep -v "// TODO" | head -1; then
+    echo "❌ Potential secrets detected! Please review and remove sensitive data."
+    exit 1
+fi
+
+# Verificar dependencias desactualizadas críticas
+echo "📦 Checking for critical dependency updates..."
+npm outdated --depth=0 2>/dev/null | grep -E "(vite|react|typescript)" || echo "✅ Core dependencies are up to date"
+
+# Generar reporte de pre-commit
+echo "📋 Generating pre-commit report..."
+mkdir -p reports
+echo "Pre-commit report - $(date)" > reports/pre-commit-report.log
+echo "Branch: $(git branch --show-current)" >> reports/pre-commit-report.log
+echo "Commit: $(git rev-parse HEAD)" >> reports/pre-commit-report.log
+echo "Files changed: $(git diff --name-only HEAD~1 2>/dev/null | wc -l)" >> reports/pre-commit-report.log
+echo "Lines changed: $(git diff --stat HEAD~1 2>/dev/null | tail -1)" >> reports/pre-commit-report.log
+
+echo "✅ Pre-commit checks completed successfully!"

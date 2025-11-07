@@ -1,0 +1,96 @@
+{
+  "extends": [
+    "next/core-web-vitals",
+    "@typescript-eslint/recommended"
+  ],
+  "plugins": [
+    "@typescript-eslint",
+    "import"
+  ],
+  "rules": {
+    // Import rules para optimización
+    "import/order": [
+      "error",
+      {
+        "groups": [
+          "builtin",
+          "external", 
+          "internal",
+          "parent",
+          "sibling",
+          "index"
+        ],
+        "newlines-between": "always",
+        "alphabetize": {
+          "order": "asc",
+          "caseInsensitive": true
+        }
+      }
+    ],
+    "import/no-duplicates": "error",
+    "import/no-unused-modules": "warn",
+    "import/no-relative-packages": "error",
+    
+    // TypeScript specific
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/prefer-const": "error",
+    "@typescript-eslint/no-var-requires": "error",
+    
+    // React specific
+    "react/jsx-uses-react": "off",
+    "react/react-in-jsx-scope": "off",
+    "react/jsx-uses-vars": "error",
+    "react/jsx-no-duplicate-props": "error",
+    "react/no-unused-prop-types": "error",
+    "react/require-default-props": "warn",
+    
+    // General JavaScript/TypeScript
+    "no-unused-vars": "off",
+    "no-console": "warn",
+    "prefer-const": "error",
+    "no-var": "error",
+    "object-shorthand": "error",
+    "prefer-template": "error",
+    
+    // Performance
+    "no-loop-func": "error",
+    "no-extend-native": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error"
+  },
+  "settings": {
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
+        "project": "./tsconfig.json"
+      }
+    },
+    "react": {
+      "version": "detect"
+    }
+  },
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx"],
+      "rules": {
+        // Permitir type-only imports
+        "import/no-relative-packages": "off"
+      }
+    },
+    {
+      "files": ["src/types/**/*", "**/*.d.ts"],
+      "rules": {
+        "import/no-external": "off",
+        "import/no-unused-modules": "off"
+      }
+    }
+  ]
+}
