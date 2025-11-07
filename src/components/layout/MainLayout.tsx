@@ -1,10 +1,12 @@
-// Layout principal: Sidebar y Header global, navegación limpia sin duplicidad
+// Layout principal con botón de prueba de perfil público
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import TestProfileButton from '../TestProfileButton';
 
 const NAV = [
   { label: 'Feed', icon: '🏠', path: '/feed' },
   { label: 'Explorar', icon: '🧭', path: '/discover' },
+  { label: 'Usuarios', icon: '👥', path: '/discover/users' },
   { label: 'Estadísticas', icon: '📊', path: '/dashboard' },
   { label: 'Mensajes', icon: '✉️', path: '/messages' },
   { label: 'Perfil', icon: '👤', path: '/profile' },
@@ -88,6 +90,9 @@ export const MainLayout: React.FC = () => {
         <main className="mt-16 px-8 py-10 min-h-[calc(100vh-4rem)]">
           <Outlet />
         </main>
+        
+        {/* Botón de prueba para ver perfil público */}
+        <TestProfileButton />
       </div>
     </div>
   );
