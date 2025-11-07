@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/services/supabase';
 import { formatRelativeTime, formatCompactNumber } from '@/utils/formatters';
 
-// Card Feed vertical
 const FeedCard = ({ post }) => (
   <article className="bg-white dark:bg-gray-950 rounded-xl shadow-md flex flex-row gap-4 overflow-hidden hover:shadow-xl transition-shadow duration-300 items-center mb-6">
     {post.media_url ? (
@@ -10,7 +9,6 @@ const FeedCard = ({ post }) => (
     ) : (
       <div className="w-32 h-32 bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-3xl text-gray-400 dark:text-gray-600 shrink-0">Sin imagen</div>
     )}
-    {/* Info */}
     <div className="flex flex-col gap-1 flex-1 p-3 min-w-0">
       <div className="flex items-center gap-3 mb-1">
         {post.profile_avatar_url ? (
@@ -31,6 +29,17 @@ const FeedCard = ({ post }) => (
   </article>
 );
 
+async function getSupabaseUser() {
+  // Soporte para v2 y v1 de Supabase Auth
+  if (supabase.auth.getUser) {
+    const { data } = await supabase.auth.getUser();
+    return data?.user || null;
+  } else if (supabase.auth.user) {
+    return supabase.auth.user();
+  }
+  return null;
+}
+
 export default function FeedPage() {
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,14 +50,12 @@ export default function FeedPage() {
       setLoading(true);
       setError('');
       try {
-        // Obtener usuario actual (ajusta según Auth de tu proyecto)
-        const user = supabase.auth.user();
-        if (!user) {
-          setError('Debes iniciar sesión.');
+        const user = await getSupabaseUser();
+        if (!user || !user.id) {
+          setError('Debes iniciar sesión para ver tu feed.');
           setLoading(false);
           return;
         }
-        // Obtener a quién sigue el usuario
         const { data: following, error: followErr } = await supabase
           .from('follows')
           .select('followed_id')
@@ -60,7 +67,6 @@ export default function FeedPage() {
           setLoading(false);
           return;
         }
-        // Traer publicaciones recientes de los seguidos con perfil
         const { data: posts, error: postsErr } = await supabase
           .from('contents')
           .select('*, profiles:author_id(display_name,avatar_url)')
@@ -77,8 +83,14 @@ export default function FeedPage() {
         );
         setLoading(false);
       } catch (err) {
-        setError('Error al cargar el feed');
+        setError(
+          'Error al cargar el feed. Verifica que tienes usuarios seguidos, publicaciones activas, y sesión iniciada.' +
+          (err && err.message ? `\n(${err.message})` : '')
+        );
         setLoading(false);
+        // Debug: imprime error real en consola
+        // eslint-disable-next-line
+        console.error('Feed error:', err);
       }
     })();
   }, []);
@@ -87,7 +99,7 @@ export default function FeedPage() {
     <section className="max-w-2xl mx-auto py-8 px-3">
       <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">Feed de seguidos</h1>
       {loading && <div className="py-10 text-center text-gray-400">Cargando...</div>}
-      {error && !loading && <div className="py-10 text-center text-red-600">{error}</div>}
+      {error && !loading && <div className="py-10 text-center text-red-600 whitespace-pre-line">{error}</div>}
       {!loading && !error && feed.length === 0 && (
         <div className="py-10 text-center text-gray-400">No sigues a nadie. Sigue a creadores para ver su contenido aquí.</div>
       )}
