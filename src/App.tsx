@@ -1,4 +1,4 @@
-// App principal actualizada: integra MainLayout
+// App principal: añade feed a las rutas protegidas
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContextSupabase';
@@ -6,7 +6,6 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
 
-// Lazy loading de páginas principales
 const LandingPage = React.lazy(() => import('./pages/LandingPage'));
 const LoginPage = React.lazy(() => import('./pages/auth/LoginPage'));
 const RegisterPage = React.lazy(() => import('./pages/auth/RegisterPage'));
@@ -19,6 +18,7 @@ const PublicProfilePage = React.lazy(() => import('./pages/public/PublicProfileP
 const SettingsPage = React.lazy(() => import('./pages/settings/SettingsPage'));
 const CreateContentPage = React.lazy(() => import('./pages/content/CreateContentPage'));
 const ContentManagerPage = React.lazy(() => import('./pages/content/ContentManagerPage'));
+const FeedPage = React.lazy(() => import('./pages/FeedPage'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
@@ -38,7 +38,7 @@ const RootRoute = () => {
     return <LoadingFallback />;
   }
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/feed" replace />;
   }
   return (
     <Suspense fallback={<LoadingFallback />}>
@@ -55,6 +55,16 @@ function App() {
           <Routes>
             {/* Layout global para rutas principales */}
             <Route element={<MainLayout />}>
+              <Route
+                path="/feed"
+                element={
+                  <Suspense fallback={<LoadingFallback />}>
+                    <ProtectedRoute>
+                      <FeedPage />
+                    </ProtectedRoute>
+                  </Suspense>
+                }
+              />
               <Route
                 path="/dashboard"
                 element={
@@ -125,8 +135,9 @@ function App() {
                   </Suspense>
                 }
               />
-              {/* Puedes agregar aquí el resto de tus rutas protegidas */}
+              {/* Más rutas aquí */}
             </Route>
+
             {/* Rutas públicas fuera del layout principal */}
             <Route path="/" element={<RootRoute />} />
             <Route
