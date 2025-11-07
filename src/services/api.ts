@@ -1,16 +1,15 @@
-// Servicio de API optimizado para TheFreed.v1
+// Servicio de API completamente migrado a Supabase
 import {
   User, AuthTokens, LoginCredentials, RegisterData,
   ApiResponse, PaginatedResponse, Content, Subscription,
   Message, Notification, Payment, UserSettings
 } from '../types';
+import { supabase } from './supabase';
+import { AuthService } from './auth';
 import {
-  getMockContent, getMockSubscriptions, getMockNotifications,
   getMockRecommendations, getMockTrendingContent, getMockDiscoverContent,
   trackMockAnalytics, simulateNetworkDelay
 } from './mockData';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // Cache interface
 interface CacheEntry<T> {
@@ -80,14 +79,19 @@ class ApiService {
   private readonly RETRY_DELAY = 1000; // 1 segundo
 
   constructor() {
-    // Cargar token desde localStorage al inicializar
-    this.token = localStorage.getItem('thefreed_token');
+    // Cargar sesión de Supabase
+    this.initializeAuth();
     
     // Inicializar limpieza periódica del cache y request pool
     this.startCleanupInterval();
     
     // Inicializar circuit breaker check
     this.startCircuitBreakerCheck();
+  }
+
+  private async initializeAuth() {
+    const { data: { session } } = await supabase.auth.getSession();
+    this.token = session?.access_token || null;
   }
 
   // ==================== SISTEMA DE CACHÉ ====================
@@ -101,7 +105,6 @@ class ApiService {
   }
 
   private setCache<T>(key: string, data: T, ttl: number = this.CACHE_TTL): void {
-    // Limpiar cache si está lleno
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
       const firstKey = this.cache.keys().next().value;
       this.cache.delete(firstKey);
@@ -149,7 +152,6 @@ class ApiService {
     delay: number = this.SEARCH_DEBOUNCE_DELAY
   ): Promise<T> {
     return new Promise((resolve, reject) => {
-      // Limpiar timer anterior si existe
       if (this.searchDebounceTimers.has(key)) {
         clearTimeout(this.searchDebounceTimers.get(key)!);
       }
@@ -169,8 +171,8 @@ class ApiService {
   }
 
   // ==================== REQUEST DEDUPLICATION ====================
-  private getRequestKey(endpoint: string, options: RequestInit): string {
-    return `${endpoint}_${options.method || 'GET'}_${JSON.stringify(options.body)}`;
+  private getRequestKey(queryName: string, params: any): string {
+    return `${queryName}_${JSON.stringify(params)}`;
   }
 
   private async deduplicateRequest<T>(
@@ -179,21 +181,17 @@ class ApiService {
   ): Promise<ApiResponse<T>> {
     const now = Date.now();
     
-    // Limpiar requests antiguos del pool
     for (const [poolKey, poolEntry] of Object.entries(this.requestPool)) {
       if (now - poolEntry.timestamp > this.REQUEST_POOL_CLEANUP_TIME) {
         delete this.requestPool[poolKey];
       }
     }
 
-    // Verificar si ya existe un request idéntico
     if (this.requestPool[key]) {
       return this.requestPool[key].promise;
     }
 
-    // Crear nuevo request
     const promise = fn().finally(() => {
-      // Limpiar del pool después de completar
       setTimeout(() => {
         delete this.requestPool[key];
       }, 1000);
@@ -207,7 +205,7 @@ class ApiService {
     return promise;
   }
 
-  // ==================== CONNECTION POOLING SIMULADO ====================
+  // ==================== CONNECTION POOLING ====================
   private async acquireConnection(): Promise<void> {
     return new Promise((resolve) => {
       if (this.activeRequests < this.MAX_CONCURRENT_REQUESTS) {
@@ -216,13 +214,11 @@ class ApiService {
         return;
       }
 
-      // Agregar a la cola de espera
       this.requestQueue.push(() => {
         this.activeRequests++;
         return Promise.resolve();
       });
 
-      // Procesar cola cuando haya conexiones disponibles
       const checkQueue = () => {
         if (this.activeRequests < this.MAX_CONCURRENT_REQUESTS && this.requestQueue.length > 0) {
           const nextRequest = this.requestQueue.shift()!;
@@ -230,7 +226,6 @@ class ApiService {
         }
       };
 
-      // Verificar periódicamente
       const interval = setInterval(() => {
         checkQueue();
         if (this.activeRequests < this.MAX_CONCURRENT_REQUESTS || this.requestQueue.length === 0) {
@@ -243,7 +238,6 @@ class ApiService {
   private releaseConnection(): void {
     this.activeRequests = Math.max(0, this.activeRequests - 1);
     
-    // Procesar siguiente request en cola
     if (this.requestQueue.length > 0) {
       const nextRequest = this.requestQueue.shift()!;
       this.activeRequests++;
@@ -282,17 +276,15 @@ class ApiService {
     }
   }
 
-  // ==================== ERROR HANDLING OPTIMIZADO ====================
+  // ==================== ERROR HANDLING ====================
   private isRetryableError(error: any): boolean {
     if (error instanceof ApiError) {
       return error.retryable;
     }
     
-    // Errores de red y servidor son reintentables
-    const retryableStatuses = [408, 429, 500, 502, 503, 504];
-    return retryableStatuses.includes(error.status) || 
-           error.name === 'TypeError' || // Network errors
-           (error.message && error.message.includes('fetch'));
+    return error?.message?.includes('timeout') || 
+           error?.message?.includes('network') ||
+           error?.code === 'PGRST301'; // Supabase timeout
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -318,7 +310,6 @@ class ApiService {
           break;
         }
         
-        // Exponential backoff: 1s, 2s, 4s, 8s...
         const delay = this.RETRY_DELAY * Math.pow(2, attempt);
         await this.sleep(delay);
       }
@@ -331,7 +322,6 @@ class ApiService {
   // ==================== LIMPIEZA Y MANTENIMIENTO ====================
   private startCleanupInterval(): void {
     setInterval(() => {
-      // Limpiar cache expirado
       const now = Date.now();
       for (const [key, entry] of this.cache.entries()) {
         if (!this.isValidCacheEntry(entry)) {
@@ -339,14 +329,11 @@ class ApiService {
         }
       }
       
-      // Limpiar debounce timers
       for (const [key, timer] of this.searchDebounceTimers.entries()) {
         clearTimeout(timer);
         this.searchDebounceTimers.delete(key);
       }
-      
-
-    }, 60000); // Cada minuto
+    }, 60000);
   }
 
   private startCircuitBreakerCheck(): void {
@@ -355,277 +342,498 @@ class ApiService {
           Date.now() - this.circuitBreakerLastFailureTime > this.CIRCUIT_BREAKER_TIMEOUT) {
         this.circuitBreakerState = 'HALF_OPEN';
       }
-    }, 30000); // Cada 30 segundos
+    }, 30000);
   }
 
-  // ==================== REQUEST PRINCIPAL OPTIMIZADO ====================
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    retryOnUnauthorized: boolean = true,
+  // ==================== WRAPPER SUPABASE CON OPTIMIZACIONES ====================
+  private async supabaseRequest<T>(
+    queryName: string,
+    fn: () => Promise<{ data: T | null; error: any }>,
     useCache: boolean = false,
     cacheTTL?: number
   ): Promise<ApiResponse<T>> {
     
-    // Verificar circuit breaker
     if (!this.canMakeRequest()) {
       throw new CircuitBreakerError('Circuit breaker is open. Too many failures.');
     }
 
-    // Manejar cache para requests GET
-    if (useCache && (!options.method || options.method === 'GET')) {
-      const cacheKey = this.getCacheKey(endpoint, options.body);
-      const cachedData = this.getCache<T>(cacheKey);
+    // Manejar cache
+    if (useCache) {
+      const cacheKey = this.getCacheKey(queryName);
+      const cachedData = this.getCache<ApiResponse<T>>(cacheKey);
       
       if (cachedData) {
         return cachedData;
       }
     }
 
-    // Request deduplication
-    const requestKey = this.getRequestKey(endpoint, options);
+    const requestKey = this.getRequestKey(queryName, {});
     
     const makeRequest = async (): Promise<ApiResponse<T>> => {
       await this.acquireConnection();
       
       try {
-        const url = `${API_BASE_URL}${endpoint}`;
-        
-        const headers = {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        };
+        const { data, error } = await fn();
 
-        if (this.token) {
-          headers['Authorization'] = `Bearer ${this.token}`;
-        }
-
-        // Preparar fetch options
-        const fetchOptions: RequestInit = {
-          ...options,
-          headers,
-          // Agregar timeout simulado
-          signal: AbortSignal.timeout(30000) // 30 segundos
-        };
-
-        const response = await fetch(url, fetchOptions);
-        const data = await response.json();
-
-        // Manejar cache para responses exitosas
-        if (useCache && response.ok && (!options.method || options.method === 'GET')) {
-          const cacheKey = this.getCacheKey(endpoint, options.body);
-          this.setCache(cacheKey, data, cacheTTL);
-        }
-
-        if (!response.ok) {
-          // Si es 401 y podemos reintentar, intentar refresh token
-          if (response.status === 401 && retryOnUnauthorized && this.token) {
-            const refreshed = await this.refreshAccessToken();
-            if (refreshed) {
-              // Reintentar la petición con el nuevo token
-              return this.request<T>(endpoint, options, false, useCache, cacheTTL);
-            }
-          }
-          
-          const apiError = new ApiError(
-            data.error?.message || data.message || `HTTP error! status: ${response.status}`,
-            response.status,
-            data.error?.code,
-            this.isRetryableError({ status: response.status })
+        if (error) {
+          throw new ApiError(
+            error.message || 'Database error',
+            error.code === 'PGRST116' ? 404 : 500,
+            error.code,
+            true
           );
-          
-          throw apiError;
         }
 
-        return data;
+        const response: ApiResponse<T> = {
+          success: true,
+          data: data as T,
+          timestamp: new Date().toISOString()
+        };
+
+        // Guardar en cache
+        if (useCache) {
+          const cacheKey = this.getCacheKey(queryName);
+          this.setCache(cacheKey, response, cacheTTL);
+        }
+
+        return response;
       } finally {
         this.releaseConnection();
       }
     };
 
-    // Deduplicar y reintentar con backoff
-    const finalRequest = async (): Promise<ApiResponse<T>> => {
-      try {
-        return await this.retryWithBackoff(makeRequest);
-      } catch (error) {
-        // Invalidar cache en caso de error
-        if (useCache) {
-          this.invalidateCache(endpoint);
-        }
-        throw error;
-      }
-    };
-
-    return this.deduplicateRequest(requestKey, finalRequest);
+    return this.deduplicateRequest(requestKey, () => this.retryWithBackoff(makeRequest));
   }
 
-  private async refreshAccessToken(): Promise<boolean> {
-    try {
-      const refreshToken = localStorage.getItem('thefreed_refresh_token');
-      if (!refreshToken) {
-        this.clearToken();
-        return false;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/auth/refresh-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success && data.data?.token) {
-        this.token = data.data.token;
-        localStorage.setItem('thefreed_token', data.data.token);
-        return true;
-      } else {
-        this.clearToken();
-        return false;
-      }
-    } catch (error) {
-      console.error('Error refreshing token:', error);
-      this.clearToken();
-      return false;
-    }
-  }
-
-  // Métodos de autenticación
+  // ==================== AUTENTICACIÓN ====================
   async login(credentials: LoginCredentials): Promise<ApiResponse<{ user: User; tokens: AuthTokens }>> {
-    const response = await this.request<{ user: User; token: string; refreshToken: string }>(
-      '/api/auth/login',
-      {
-        method: 'POST',
-        body: JSON.stringify(credentials),
-      }
-    );
-
-    if (response.success && response.data) {
-      this.token = response.data.token;
-      localStorage.setItem('thefreed_token', response.data.token);
-      localStorage.setItem('thefreed_refresh_token', response.data.refreshToken);
-      
-      // Invalidar cache después del login
+    const result = await AuthService.login(credentials.email, credentials.password);
+    
+    if (result.success && result.data) {
+      this.token = result.data.token;
       this.invalidateUserCache();
       
       return {
-        ...response,
+        success: true,
         data: {
-          user: response.data,
+          user: result.data.user,
           tokens: {
-            token: response.data.token,
-            refreshToken: response.data.refreshToken
+            token: result.data.token || '',
+            refreshToken: result.data.refreshToken || ''
           }
-        }
+        },
+        timestamp: new Date().toISOString()
       };
     }
 
-    return response;
+    return {
+      success: false,
+      error: result.error || 'Error de autenticación',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
   async register(userData: RegisterData): Promise<ApiResponse<{ user: User; tokens: AuthTokens }>> {
-    const response = await this.request<{ user: User; token: string; refreshToken: string }>(
-      '/api/auth/register',
+    const result = await AuthService.register(
+      userData.email, 
+      userData.password,
       {
-        method: 'POST',
-        body: JSON.stringify(userData),
+        username: userData.username,
+        firstName: userData.firstName,
+        lastName: userData.lastName
       }
     );
-
-    if (response.success && response.data) {
-      this.token = response.data.token;
-      localStorage.setItem('thefreed_token', response.data.token);
-      localStorage.setItem('thefreed_refresh_token', response.data.refreshToken);
-      
-      // Invalidar cache después del registro
+    
+    if (result.success && result.data) {
+      this.token = result.data.token;
       this.invalidateUserCache();
       
       return {
-        ...response,
+        success: true,
         data: {
-          user: response.data,
+          user: result.data.user,
           tokens: {
-            token: response.data.token,
-            refreshToken: response.data.refreshToken
+            token: result.data.token || '',
+            refreshToken: result.data.refreshToken || ''
           }
-        }
+        },
+        timestamp: new Date().toISOString()
       };
     }
 
-    return response;
+    return {
+      success: false,
+      error: result.error || 'Error de registro',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
   async logout(): Promise<ApiResponse<null>> {
-    const response = await this.request<null>('/api/auth/logout', {
-      method: 'POST',
-    });
+    const result = await AuthService.logout();
+    
+    if (result.success) {
+      this.token = null;
+      this.clearCache();
+    }
+
+    return {
+      success: result.success,
+      error: result.error,
+      data: null,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async getCurrentUser(): Promise<ApiResponse<{ user: User }>> {
+    return this.supabaseRequest(
+      'getCurrentUser',
+      async () => {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error || !user) {
+          return { data: null, error: error || new Error('No user found') };
+        }
+
+        return { 
+          data: { user: AuthService.mapSupabaseUser(user) }, 
+          error: null 
+        };
+      },
+      true,
+      2 * 60 * 1000
+    );
+  }
+
+  // ==================== USUARIOS ====================
+  async getUsers(params?: { 
+    page?: number; 
+    limit?: number; 
+    search?: string; 
+    userType?: string 
+  }): Promise<PaginatedResponse<User>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const queryFn = async () => {
+      let query = supabase
+        .from('profiles')
+        .select('*, users!inner(*)', { count: 'exact' });
+
+      if (params?.search) {
+        query = query.or(`username.ilike.%${params.search}%,display_name.ilike.%${params.search}%`);
+      }
+
+      if (params?.userType) {
+        query = query.eq('users.user_type', params.userType);
+      }
+
+      const { data, error, count } = await query
+        .range(offset, offset + limit - 1)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return { data: null, error };
+      }
+
+      const users: User[] = data?.map((profile: any) => ({
+        id: profile.user_id,
+        email: profile.users.email || '',
+        username: profile.username || '',
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        userType: profile.users.user_type || 'USER',
+        isEmailVerified: profile.users.email_confirmed_at ? true : false,
+        isPhoneVerified: false,
+        isActive: profile.is_active,
+        isSuspended: false,
+        createdAt: profile.created_at,
+        lastActive: profile.updated_at,
+        profile: {
+          id: profile.id,
+          userId: profile.user_id,
+          displayName: profile.display_name || '',
+          bio: profile.bio || '',
+          avatarUrl: profile.avatar_url || '',
+          bannerUrl: profile.banner_url || '',
+          website: profile.website || '',
+          socialLinks: profile.social_links || {},
+          categories: profile.categories || [],
+          contentTypes: profile.content_types || [],
+          isVerified: profile.is_verified || false,
+          verificationLevel: profile.verification_level || 'BASIC',
+          isLiveStreaming: false,
+          isAdultContent: profile.is_adult_content || false,
+          monthlyPrice: profile.monthly_price || 0,
+          yearlyPrice: profile.yearly_price || 0,
+          customPrice: profile.custom_price || 0,
+          commissionRate: profile.commission_rate || 15,
+          isPublic: profile.is_public,
+          isActive: profile.is_active,
+          followerCount: profile.follower_count || 0,
+          totalViews: profile.total_views || 0,
+          totalEarnings: profile.total_earnings || 0,
+          totalContent: profile.total_content || 0,
+          createdAt: profile.created_at,
+          updatedAt: profile.updated_at
+        }
+      })) || [];
+
+      return { data: users, error: null };
+    };
+
+    if (params?.search) {
+      const searchKey = `getUsers_${params.search}`;
+      return this.debounceSearch(searchKey, async () => {
+        const response = await this.supabaseRequest('getUsers', queryFn, true, 2 * 60 * 1000);
+        
+        return {
+          ...response,
+          data: response.data || [],
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil((count || 0) / limit),
+            totalItems: count || 0,
+            itemsPerPage: limit,
+            hasNextPage: offset + limit < (count || 0),
+            hasPrevPage: page > 1
+          }
+        };
+      });
+    }
+    
+    const response = await this.supabaseRequest('getUsers', queryFn, true, 5 * 60 * 1000);
+    
+    return {
+      ...response,
+      data: response.data || [],
+      pagination: {
+        currentPage: page,
+        totalPages: 1,
+        totalItems: (response.data as any)?.length || 0,
+        itemsPerPage: limit,
+        hasNextPage: false,
+        hasPrevPage: false
+      }
+    };
+  }
+
+  async getUser(id: string): Promise<ApiResponse<{ user: User }>> {
+    return this.supabaseRequest(
+      `getUser_${id}`,
+      async () => {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('*, users!inner(*)')
+          .eq('user_id', id)
+          .maybeSingle();
+
+        if (error || !profile) {
+          return { data: null, error: error || new Error('User not found') };
+        }
+
+        const user: User = {
+          id: profile.user_id,
+          email: profile.users.email || '',
+          username: profile.username || '',
+          firstName: profile.first_name || '',
+          lastName: profile.last_name || '',
+          userType: profile.users.user_type || 'USER',
+          isEmailVerified: profile.users.email_confirmed_at ? true : false,
+          isPhoneVerified: false,
+          isActive: profile.is_active,
+          isSuspended: false,
+          createdAt: profile.created_at,
+          lastActive: profile.updated_at,
+          profile: {
+            id: profile.id,
+            userId: profile.user_id,
+            displayName: profile.display_name || '',
+            bio: profile.bio || '',
+            avatarUrl: profile.avatar_url || '',
+            bannerUrl: profile.banner_url || '',
+            website: profile.website || '',
+            socialLinks: profile.social_links || {},
+            categories: profile.categories || [],
+            contentTypes: profile.content_types || [],
+            isVerified: profile.is_verified || false,
+            verificationLevel: profile.verification_level || 'BASIC',
+            isLiveStreaming: false,
+            isAdultContent: profile.is_adult_content || false,
+            monthlyPrice: profile.monthly_price || 0,
+            yearlyPrice: profile.yearly_price || 0,
+            customPrice: profile.custom_price || 0,
+            commissionRate: profile.commission_rate || 15,
+            isPublic: profile.is_public,
+            isActive: profile.is_active,
+            followerCount: profile.follower_count || 0,
+            totalViews: profile.total_views || 0,
+            totalEarnings: profile.total_earnings || 0,
+            totalContent: profile.total_content || 0,
+            createdAt: profile.created_at,
+            updatedAt: profile.updated_at
+          }
+        };
+
+        return { data: { user }, error: null };
+      },
+      true,
+      5 * 60 * 1000
+    );
+  }
+
+  async updateUser(id: string, userData: Partial<User>): Promise<ApiResponse<{ user: User }>> {
+    const response = await this.supabaseRequest(
+      `updateUser_${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({
+            display_name: userData.profile?.displayName,
+            bio: userData.profile?.bio,
+            avatar_url: userData.profile?.avatarUrl,
+            banner_url: userData.profile?.bannerUrl,
+            website: userData.profile?.website,
+            social_links: userData.profile?.socialLinks,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', id)
+          .select('*, users!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Update failed') };
+        }
+
+        const user: User = {
+          id: data.user_id,
+          email: data.users.email || '',
+          username: data.username || '',
+          firstName: data.first_name || '',
+          lastName: data.last_name || '',
+          userType: data.users.user_type || 'USER',
+          isEmailVerified: true,
+          isPhoneVerified: false,
+          isActive: data.is_active,
+          isSuspended: false,
+          createdAt: data.created_at,
+          lastActive: data.updated_at,
+          profile: {
+            id: data.id,
+            userId: data.user_id,
+            displayName: data.display_name || '',
+            bio: data.bio || '',
+            avatarUrl: data.avatar_url || '',
+            bannerUrl: data.banner_url || '',
+            website: data.website || '',
+            socialLinks: data.social_links || {},
+            categories: data.categories || [],
+            contentTypes: data.content_types || [],
+            isVerified: data.is_verified || false,
+            verificationLevel: data.verification_level || 'BASIC',
+            isLiveStreaming: false,
+            isAdultContent: data.is_adult_content || false,
+            monthlyPrice: data.monthly_price || 0,
+            yearlyPrice: data.yearly_price || 0,
+            customPrice: data.custom_price || 0,
+            commissionRate: data.commission_rate || 15,
+            isPublic: data.is_public,
+            isActive: data.is_active,
+            followerCount: data.follower_count || 0,
+            totalViews: data.total_views || 0,
+            totalEarnings: data.total_earnings || 0,
+            totalContent: data.total_content || 0,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+          }
+        };
+
+        return { data: { user }, error: null };
+      },
+      false
+    );
 
     if (response.success) {
-      this.token = null;
-      localStorage.removeItem('thefreed_token');
-      localStorage.removeItem('thefreed_refresh_token');
-      
-      // Limpiar todo el cache después del logout
-      this.clearCache();
+      this.invalidateUserCache();
     }
 
     return response;
   }
 
-  async getCurrentUser(): Promise<ApiResponse<{ user: User }>> {
-    return this.request<{ user: User }>('/api/auth/me');
-  }
-
-  // Métodos de usuarios con optimizaciones
-  async getUsers(params?: { page?: number; limit?: number; search?: string; userType?: string }): Promise<PaginatedResponse<User>> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, value.toString());
-        }
-      });
-    }
-
-    const endpoint = `/api/users${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    
-    // Aplicar debounce solo para búsquedas
-    if (params?.search) {
-      const searchKey = `getUsers_${params.search}`;
-      return this.debounceSearch(searchKey, () => 
-        this.request<PaginatedResponse<User>>(endpoint, {}, true, true, 2 * 60 * 1000) // Cache por 2 min para búsquedas
-      );
-    }
-    
-    // Cache por 5 minutos para requests sin búsqueda
-    return this.request<PaginatedResponse<User>>(endpoint, {}, true, true, 5 * 60 * 1000);
-  }
-
-  async getUser(id: string): Promise<ApiResponse<{ user: User }>> {
-    return this.request<{ user: User }>(`/api/users/${id}`);
-  }
-
-  async updateUser(id: string, userData: Partial<User>): Promise<ApiResponse<{ user: User }>> {
-    return this.request<{ user: User }>(`/api/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(userData),
-    });
-  }
-
   async getUserSettings(userId: string): Promise<ApiResponse<{ settings: UserSettings }>> {
-    return this.request<{ settings: UserSettings }>(`/api/users/${userId}/settings`);
+    return this.supabaseRequest(
+      `getUserSettings_${userId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        const settings: UserSettings = data || {
+          userId,
+          emailNotifications: true,
+          pushNotifications: true,
+          smsNotifications: false,
+          language: 'en',
+          theme: 'light',
+          privacy: {
+            profileVisibility: 'public',
+            showEmail: false,
+            showPhone: false
+          }
+        };
+
+        return { data: { settings }, error: null };
+      },
+      true,
+      5 * 60 * 1000
+    );
   }
 
   async updateUserSettings(userId: string, settings: Partial<UserSettings>): Promise<ApiResponse<{ settings: UserSettings }>> {
-    return this.request<{ settings: UserSettings }>(`/api/users/${userId}/settings`, {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    });
+    const response = await this.supabaseRequest(
+      `updateUserSettings_${userId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .upsert({
+            user_id: userId,
+            email_notifications: settings.emailNotifications,
+            push_notifications: settings.pushNotifications,
+            sms_notifications: settings.smsNotifications,
+            language: settings.language,
+            theme: settings.theme,
+            privacy: settings.privacy,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .select()
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Update failed') };
+        }
+
+        return { data: { settings: data as UserSettings }, error: null };
+      },
+      false
+    );
+
+    if (response.success) {
+      this.invalidateCache(`getUserSettings_${userId}`);
+    }
+
+    return response;
   }
 
-  // Métodos de contenido con datos mock para carga instantánea
+  // ==================== CONTENIDO ====================
   async getContent(params?: {
     page?: number;
     limit?: number;
@@ -637,137 +845,393 @@ class ApiService {
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<PaginatedResponse<Content>> {
-    // Simular un pequeño delay para mostrar que la carga funciona
-    await simulateNetworkDelay(50);
-    
-    // Usar datos mock en lugar de llamada HTTP
-    return getMockContent(params);
-  }
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
 
-  async getContentById(id: string): Promise<ApiResponse<{ content: Content }>> {
-    await simulateNetworkDelay(10);
-    
-    // Buscar contenido por ID en los datos mock
-    const allContent = getMockContent();
-    const content = allContent.data.find(c => c.id === id);
-    
-    if (!content) {
-      return {
-        success: false,
-        error: 'Content not found',
-        data: null,
-        timestamp: new Date().toISOString()
-      };
+    const queryFn = async () => {
+      let query = supabase
+        .from('contents')
+        .select('*, profiles!inner(*)', { count: 'exact' })
+        .eq('status', 'published');
+
+      if (params?.category) {
+        query = query.eq('category', params.category);
+      }
+
+      if (params?.contentType) {
+        query = query.eq('content_type', params.contentType);
+      }
+
+      if (params?.creatorId) {
+        query = query.eq('author_id', params.creatorId);
+      }
+
+      if (params?.isPremium !== undefined) {
+        query = query.eq('is_premium', params.isPremium);
+      }
+
+      if (params?.search) {
+        query = query.or(`title.ilike.%${params.search}%,description.ilike.%${params.search}%`);
+      }
+
+      const sortBy = params?.sortBy || 'created_at';
+      const sortOrder = params?.sortOrder === 'asc';
+
+      const { data, error, count } = await query
+        .range(offset, offset + limit - 1)
+        .order(sortBy, { ascending: sortOrder });
+
+      return { data, error, count };
+    };
+
+    if (params?.search) {
+      const searchKey = `getContent_${params.search}`;
+      return this.debounceSearch(searchKey, async () => {
+        const { data, error, count } = await queryFn();
+        
+        if (error) {
+          throw new ApiError(error.message, 500, error.code, true);
+        }
+
+        return {
+          success: true,
+          data: data as Content[] || [],
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil((count || 0) / limit),
+            totalItems: count || 0,
+            itemsPerPage: limit,
+            hasNextPage: offset + limit < (count || 0),
+            hasPrevPage: page > 1
+          },
+          timestamp: new Date().toISOString()
+        };
+      });
     }
+
+    const { data, error, count } = await queryFn();
     
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
+    }
+
     return {
       success: true,
-      data: { content },
+      data: data as Content[] || [],
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        itemsPerPage: limit,
+        hasNextPage: offset + limit < (count || 0),
+        hasPrevPage: page > 1
+      },
       timestamp: new Date().toISOString()
     };
   }
 
-  async getContentByCategory(category: string, params?: { page?: number; limit?: number }): Promise<PaginatedResponse<Content>> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, value.toString());
-        }
-      });
-    }
+  async getContentById(id: string): Promise<ApiResponse<{ content: Content }>> {
+    return this.supabaseRequest(
+      `getContentById_${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('contents')
+          .select('*, profiles!inner(*)')
+          .eq('id', id)
+          .maybeSingle();
 
-    const endpoint = `/api/content/category/${category}${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    
-    // Cache por 10 minutos para contenido por categoría (menos cambiante)
-    return this.request<PaginatedResponse<Content>>(endpoint, {}, true, true, 10 * 60 * 1000);
+        if (error || !data) {
+          return { data: null, error: error || new Error('Content not found') };
+        }
+
+        return { data: { content: data as Content }, error: null };
+      },
+      true,
+      5 * 60 * 1000
+    );
+  }
+
+  async getContentByCategory(category: string, params?: { page?: number; limit?: number }): Promise<PaginatedResponse<Content>> {
+    return this.getContent({ ...params, category });
   }
 
   async createContent(contentData: Partial<Content>): Promise<ApiResponse<{ content: Content }>> {
-    const response = await this.request<{ content: Content }>('/api/content', {
-      method: 'POST',
-      body: JSON.stringify(contentData),
-    });
-    
-    // Invalidar cache de contenido después de crear
+    const response = await this.supabaseRequest(
+      'createContent',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('contents')
+          .insert([{
+            title: contentData.title,
+            description: contentData.description,
+            content_html: contentData.contentHtml,
+            content_type: contentData.contentType,
+            category: contentData.category,
+            tags: contentData.tags,
+            visibility: contentData.visibility,
+            price: contentData.price,
+            is_premium: contentData.isPremium,
+            is_free: contentData.isFree,
+            is_nsfw: contentData.isNsfw,
+            age_restriction: contentData.ageRestriction,
+            media_url: contentData.mediaUrl,
+            thumbnail_url: contentData.thumbnailUrl,
+            status: 'published',
+            author_id: user.id
+          }])
+          .select('*, profiles!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Create failed') };
+        }
+
+        return { data: { content: data as Content }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateContentCache();
     }
-    
+
     return response;
   }
 
   async updateContent(id: string, contentData: Partial<Content>): Promise<ApiResponse<{ content: Content }>> {
-    const response = await this.request<{ content: Content }>(`/api/content/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(contentData),
-    });
-    
-    // Invalidar cache de contenido después de actualizar
+    const response = await this.supabaseRequest(
+      `updateContent_${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('contents')
+          .update({
+            title: contentData.title,
+            description: contentData.description,
+            content_html: contentData.contentHtml,
+            content_type: contentData.contentType,
+            category: contentData.category,
+            tags: contentData.tags,
+            visibility: contentData.visibility,
+            price: contentData.price,
+            is_premium: contentData.isPremium,
+            is_free: contentData.isFree,
+            is_nsfw: contentData.isNsfw,
+            media_url: contentData.mediaUrl,
+            thumbnail_url: contentData.thumbnailUrl,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .select('*, profiles!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Update failed') };
+        }
+
+        return { data: { content: data as Content }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateContentCache();
     }
-    
+
     return response;
   }
 
   async deleteContent(id: string): Promise<ApiResponse<null>> {
-    const response = await this.request<null>(`/api/content/${id}`, {
-      method: 'DELETE',
-    });
-    
-    // Invalidar cache de contenido después de eliminar
+    const response = await this.supabaseRequest(
+      `deleteContent_${id}`,
+      async () => {
+        const { error } = await supabase
+          .from('contents')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: null, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateContentCache();
     }
-    
+
     return response;
   }
 
   async likeContent(id: string): Promise<ApiResponse<{ liked: boolean }>> {
-    return this.request<{ liked: boolean }>(`/api/content/${id}/like`, {
-      method: 'POST',
-    });
+    return this.supabaseRequest(
+      `likeContent_${id}`,
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        // Verificar si ya existe el like
+        const { data: existing } = await supabase
+          .from('likes')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('content_id', id)
+          .maybeSingle();
+
+        if (existing) {
+          // Eliminar like
+          const { error } = await supabase
+            .from('likes')
+            .delete()
+            .eq('id', existing.id);
+
+          if (error) return { data: null, error };
+
+          // Decrementar contador
+          await supabase.rpc('decrement_likes_count', { content_id: id });
+
+          return { data: { liked: false }, error: null };
+        } else {
+          // Crear like
+          const { error } = await supabase
+            .from('likes')
+            .insert([{ user_id: user.id, content_id: id }]);
+
+          if (error) return { data: null, error };
+
+          // Incrementar contador
+          await supabase.rpc('increment_likes_count', { content_id: id });
+
+          return { data: { liked: true }, error: null };
+        }
+      },
+      false
+    );
   }
 
-  async uploadContentFile(file: File): Promise<ApiResponse<{ fileUrl: string; fileName: string; originalName: string; size: number; mimeType: string }>> {
-    const formData = new FormData();
-    formData.append('file', file);
-
+  async uploadContentFile(file: File): Promise<ApiResponse<{ 
+    fileUrl: string; 
+    fileName: string; 
+    originalName: string; 
+    size: number; 
+    mimeType: string 
+  }>> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/content/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new ApiError(`Upload failed: ${response.statusText}`, response.status, 'UPLOAD_ERROR', true);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
       }
 
-      const result = await response.json();
+      const fileName = `${user.id}/${Date.now()}_${file.name}`;
       
-      // Invalidar cache de contenido después de subir archivo
+      const { data, error } = await supabase.storage
+        .from('content-media')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) {
+        throw new ApiError(error.message, 500, 'UPLOAD_ERROR', true);
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('content-media')
+        .getPublicUrl(data.path);
+
+      const result: ApiResponse<any> = {
+        success: true,
+        data: {
+          fileUrl: publicUrl,
+          fileName: data.path,
+          originalName: file.name,
+          size: file.size,
+          mimeType: file.type
+        },
+        timestamp: new Date().toISOString()
+      };
+
       if (result.success) {
         this.invalidateContentCache();
       }
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       console.error('File upload failed:', error);
       throw error;
     }
   }
 
-  // Métodos de suscripciones
-  async getSubscriptions(params?: { page?: number; limit?: number; status?: string; creatorId?: string }): Promise<PaginatedResponse<Subscription>> {
-    // Simular un pequeño delay para mostrar que la carga funciona
-    await simulateNetworkDelay(30);
+  // ==================== SUSCRIPCIONES ====================
+  async getSubscriptions(params?: { 
+    page?: number; 
+    limit?: number; 
+    status?: string; 
+    creatorId?: string 
+  }): Promise<PaginatedResponse<Subscription>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const { data: { user } } = await supabase.auth.getUser();
     
-    // Usar datos mock en lugar de llamada HTTP
-    return getMockSubscriptions(params);
+    if (!user) {
+      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
+    }
+
+    const queryFn = async () => {
+      let query = supabase
+        .from('subscriptions')
+        .select('*, profiles!inner(*)', { count: 'exact' })
+        .eq('user_id', user.id);
+
+      if (params?.status) {
+        query = query.eq('status', params.status);
+      }
+
+      if (params?.creatorId) {
+        query = query.eq('creator_id', params.creatorId);
+      }
+
+      const { data, error, count } = await query
+        .range(offset, offset + limit - 1)
+        .order('created_at', { ascending: false });
+
+      return { data, error, count };
+    };
+
+    const { data, error, count } = await queryFn();
+    
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
+    }
+
+    return {
+      success: true,
+      data: data as Subscription[] || [],
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        itemsPerPage: limit,
+        hasNextPage: offset + limit < (count || 0),
+        hasPrevPage: page > 1
+      },
+      timestamp: new Date().toISOString()
+    };
   }
 
   async createSubscription(subscriptionData: {
@@ -775,58 +1239,154 @@ class ApiService {
     subscriptionType: 'MONTHLY' | 'YEARLY' | 'LIFETIME' | 'CUSTOM';
     paymentMethodId?: string;
   }): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.request<{ subscription: Subscription }>('/api/subscriptions', {
-      method: 'POST',
-      body: JSON.stringify(subscriptionData),
-    });
-    
-    // Invalidar cache de suscripciones después de crear
+    const response = await this.supabaseRequest(
+      'createSubscription',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .insert([{
+            user_id: user.id,
+            creator_id: subscriptionData.creatorId,
+            subscription_type: subscriptionData.subscriptionType,
+            status: 'active',
+            payment_method_id: subscriptionData.paymentMethodId
+          }])
+          .select('*, profiles!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Create failed') };
+        }
+
+        return { data: { subscription: data as Subscription }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateSubscriptionCache();
     }
-    
+
     return response;
   }
 
   async cancelSubscription(id: string): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.request<{ subscription: Subscription }>(`/api/subscriptions/${id}/cancel`, {
-      method: 'PUT',
-    });
-    
-    // Invalidar cache de suscripciones después de cancelar
+    const response = await this.supabaseRequest(
+      `cancelSubscription_${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .update({ 
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .select('*, profiles!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Cancel failed') };
+        }
+
+        return { data: { subscription: data as Subscription }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateSubscriptionCache();
     }
-    
+
     return response;
   }
 
   async renewSubscription(id: string): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.request<{ subscription: Subscription }>(`/api/subscriptions/${id}/renew`, {
-      method: 'PUT',
-    });
-    
-    // Invalidar cache de suscripciones después de renovar
+    const response = await this.supabaseRequest(
+      `renewSubscription_${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .update({ 
+            status: 'active',
+            renewed_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .select('*, profiles!inner(*)')
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Renew failed') };
+        }
+
+        return { data: { subscription: data as Subscription }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateSubscriptionCache();
     }
-    
+
     return response;
   }
 
-  // Métodos de pagos
-  async getPayments(params?: { page?: number; limit?: number; status?: string; type?: string }): Promise<PaginatedResponse<Payment>> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, value.toString());
-        }
-      });
+  // ==================== PAGOS ====================
+  async getPayments(params?: { 
+    page?: number; 
+    limit?: number; 
+    status?: string; 
+    type?: string 
+  }): Promise<PaginatedResponse<Payment>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
     }
 
-    const endpoint = `/api/payments${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    return this.request<PaginatedResponse<Payment>>(endpoint);
+    let query = supabase
+      .from('payments')
+      .select('*', { count: 'exact' })
+      .eq('user_id', user.id);
+
+    if (params?.status) {
+      query = query.eq('status', params.status);
+    }
+
+    if (params?.type) {
+      query = query.eq('payment_type', params.type);
+    }
+
+    const { data, error, count } = await query
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
+    }
+
+    return {
+      success: true,
+      data: data as Payment[] || [],
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        itemsPerPage: limit,
+        hasNextPage: offset + limit < (count || 0),
+        hasPrevPage: page > 1
+      },
+      timestamp: new Date().toISOString()
+    };
   }
 
   async createPaymentIntent(paymentData: {
@@ -847,42 +1407,156 @@ class ApiService {
     };
     payment: Payment;
   }>> {
-    return this.request('/api/payments/create-payment-intent', {
-      method: 'POST',
-      body: JSON.stringify(paymentData),
-    });
+    return this.supabaseRequest(
+      'createPaymentIntent',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('payments')
+          .insert([{
+            user_id: user.id,
+            amount: paymentData.amount,
+            currency: paymentData.currency || 'USD',
+            payment_method_id: paymentData.paymentMethodId,
+            payment_type: paymentData.type || 'SUBSCRIPTION',
+            description: paymentData.description,
+            subscription_id: paymentData.subscriptionId,
+            content_id: paymentData.contentId,
+            status: 'pending'
+          }])
+          .select()
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Payment creation failed') };
+        }
+
+        return { 
+          data: {
+            paymentIntent: {
+              id: data.id,
+              clientSecret: `cs_${data.id}`,
+              amount: data.amount,
+              currency: data.currency,
+              status: data.status
+            },
+            payment: data as Payment
+          }, 
+          error: null 
+        };
+      },
+      false
+    );
+
+    return response;
   }
 
   async confirmPayment(paymentIntentId: string): Promise<ApiResponse<{ payment: Payment }>> {
-    return this.request<{ payment: Payment }>('/api/payments/confirm-payment', {
-      method: 'POST',
-      body: JSON.stringify({ paymentIntentId }),
-    });
+    return this.supabaseRequest(
+      `confirmPayment_${paymentIntentId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('payments')
+          .update({ 
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', paymentIntentId)
+          .select()
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Confirm failed') };
+        }
+
+        return { data: { payment: data as Payment }, error: null };
+      },
+      false
+    );
   }
 
-  // Métodos de mensajes con optimizaciones
-  async getMessages(params?: { page?: number; limit?: number; search?: string }): Promise<PaginatedResponse<Message>> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, value.toString());
+  // ==================== MENSAJES ====================
+  async getMessages(params?: { 
+    page?: number; 
+    limit?: number; 
+    search?: string 
+  }): Promise<PaginatedResponse<Message>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
+    }
+
+    const queryFn = async () => {
+      let query = supabase
+        .from('messages')
+        .select('*', { count: 'exact' })
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`);
+
+      if (params?.search) {
+        query = query.ilike('content', `%${params.search}%`);
+      }
+
+      const { data, error, count } = await query
+        .range(offset, offset + limit - 1)
+        .order('created_at', { ascending: false });
+
+      return { data, error, count };
+    };
+
+    if (params?.search) {
+      const searchKey = `getMessages_${params.search}`;
+      return this.debounceSearch(searchKey, async () => {
+        const { data, error, count } = await queryFn();
+        
+        if (error) {
+          throw new ApiError(error.message, 500, error.code, true);
         }
+
+        return {
+          success: true,
+          data: data as Message[] || [],
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil((count || 0) / limit),
+            totalItems: count || 0,
+            itemsPerPage: limit,
+            hasNextPage: offset + limit < (count || 0),
+            hasPrevPage: page > 1
+          },
+          timestamp: new Date().toISOString()
+        };
       });
     }
 
-    const endpoint = `/api/messages${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    const { data, error, count } = await queryFn();
     
-    // Aplicar debounce solo para búsquedas
-    if (params?.search) {
-      const searchKey = `getMessages_${params.search}`;
-      return this.debounceSearch(searchKey, () => 
-        this.request<PaginatedResponse<Message>>(endpoint, {}, true, true, 1 * 60 * 1000) // Cache por 1 min para mensajes
-      );
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
     }
-    
-    // Cache por 2 minutos para mensajes sin búsqueda
-    return this.request<PaginatedResponse<Message>>(endpoint, {}, true, true, 2 * 60 * 1000);
+
+    return {
+      success: true,
+      data: data as Message[] || [],
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        itemsPerPage: limit,
+        hasNextPage: offset + limit < (count || 0),
+        hasPrevPage: page > 1
+      },
+      timestamp: new Date().toISOString()
+    };
   }
 
   async sendMessage(messageData: {
@@ -891,64 +1565,156 @@ class ApiService {
     messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
     mediaUrl?: string;
   }): Promise<ApiResponse<{ message: Message }>> {
-    const response = await this.request<{ message: Message }>('/api/messages/send', {
-      method: 'POST',
-      body: JSON.stringify(messageData),
-    });
-    
-    // Invalidar cache de mensajes después de enviar
+    const response = await this.supabaseRequest(
+      'sendMessage',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('messages')
+          .insert([{
+            sender_id: user.id,
+            receiver_id: messageData.receiverId,
+            content: messageData.content,
+            message_type: messageData.messageType || 'TEXT',
+            media_url: messageData.mediaUrl,
+            is_read: false
+          }])
+          .select()
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Send failed') };
+        }
+
+        return { data: { message: data as Message }, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateMessageCache();
     }
-    
+
     return response;
   }
 
-  // Métodos de notificaciones con optimizaciones
-  async getNotifications(params?: { page?: number; limit?: number; search?: string }): Promise<PaginatedResponse<Notification>> {
-    // Simular un pequeño delay para mostrar que la carga funciona
-    await simulateNetworkDelay(20);
+  // ==================== NOTIFICACIONES ====================
+  async getNotifications(params?: { 
+    page?: number; 
+    limit?: number; 
+    search?: string 
+  }): Promise<PaginatedResponse<Notification>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const { data: { user } } = await supabase.auth.getUser();
     
-    // Usar datos mock en lugar de llamada HTTP
-    return getMockNotifications(params);
+    if (!user) {
+      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
+    }
+
+    let query = supabase
+      .from('notifications')
+      .select('*', { count: 'exact' })
+      .eq('user_id', user.id);
+
+    if (params?.search) {
+      query = query.ilike('message', `%${params.search}%`);
+    }
+
+    const { data, error, count } = await query
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
+    }
+
+    return {
+      success: true,
+      data: data as Notification[] || [],
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        itemsPerPage: limit,
+        hasNextPage: offset + limit < (count || 0),
+        hasPrevPage: page > 1
+      },
+      timestamp: new Date().toISOString()
+    };
   }
 
   async markNotificationAsRead(id: string): Promise<ApiResponse<null>> {
-    const response = await this.request<null>(`/api/notifications/${id}/read`, {
-      method: 'PUT',
-    });
-    
-    // Invalidar cache de notificaciones después de marcar como leída
+    const response = await this.supabaseRequest(
+      `markNotificationAsRead_${id}`,
+      async () => {
+        const { error } = await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('id', id);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: null, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateNotificationCache();
     }
-    
+
     return response;
   }
 
   async markAllNotificationsAsRead(): Promise<ApiResponse<null>> {
-    const response = await this.request<null>('/api/notifications/read-all', {
-      method: 'PUT',
-    });
-    
-    // Invalidar cache de notificaciones después de marcar todas como leídas
+    const response = await this.supabaseRequest(
+      'markAllNotificationsAsRead',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { error } = await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('user_id', user.id)
+          .eq('is_read', false);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: null, error: null };
+      },
+      false
+    );
+
     if (response.success) {
       this.invalidateNotificationCache();
     }
-    
+
     return response;
   }
 
-  // Utilidades de autenticación
+  // ==================== UTILIDADES DE AUTENTICACIÓN ====================
   setToken(token: string) {
     this.token = token;
-    localStorage.setItem('thefreed_token', token);
   }
 
   clearToken() {
     this.token = null;
-    localStorage.removeItem('thefreed_token');
-    localStorage.removeItem('thefreed_refresh_token');
   }
 
   getToken(): string | null {
@@ -959,7 +1725,6 @@ class ApiService {
     return !!this.token;
   }
 
-  // Verificar si el token está próximo a expirar (menos de 1 hora)
   isTokenExpiringSoon(): boolean {
     if (!this.token) return true;
     
@@ -968,34 +1733,36 @@ class ApiService {
       const currentTime = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = payload.exp - currentTime;
       
-      // Menos de 1 hora (3600 segundos)
       return timeUntilExpiry < 3600;
     } catch {
       return true;
     }
   }
 
-  // Renovar token automáticamente si está próximo a expirar
   async ensureValidToken(): Promise<boolean> {
     if (!this.isAuthenticated()) {
       return false;
     }
 
     if (this.isTokenExpiringSoon()) {
-      return await this.refreshAccessToken();
+      const result = await AuthService.refreshToken();
+      if (result.success && result.data) {
+        this.token = result.data.token || null;
+        return true;
+      }
+      return false;
     }
 
     return true;
   }
 
-  // Obtener información del token (payload decodificado)
   getTokenInfo(): any {
     if (!this.token) return null;
     
     try {
       const payload = JSON.parse(atob(this.token.split('.')[1]));
       return {
-        userId: payload.userId,
+        userId: payload.sub,
         exp: payload.exp,
         iat: payload.iat,
         timeUntilExpiry: payload.exp - Math.floor(Date.now() / 1000)
@@ -1005,14 +1772,11 @@ class ApiService {
     }
   }
 
-  // ==================== MÉTODOS PÚBLICOS PARA CONTROL DE OPTIMIZACIONES ====================
-  
-  // Invalidar cache manualmente
+  // ==================== CONTROL DE OPTIMIZACIONES ====================
   invalidateApiCache(pattern?: string): void {
     this.invalidateCache(pattern);
   }
 
-  // Obtener estadísticas de rendimiento
   getPerformanceStats(): {
     cacheSize: number;
     activeRequests: number;
@@ -1029,7 +1793,6 @@ class ApiService {
     };
   }
 
-  // Obtener información del cache
   getCacheInfo(): Array<{
     key: string;
     age: number;
@@ -1037,12 +1800,7 @@ class ApiService {
     isExpired: boolean;
   }> {
     const now = Date.now();
-    const cacheInfo: Array<{
-      key: string;
-      age: number;
-      ttl: number;
-      isExpired: boolean;
-    }> = [];
+    const cacheInfo: Array<any> = [];
 
     for (const [key, entry] of this.cache.entries()) {
       cacheInfo.push({
@@ -1056,38 +1814,30 @@ class ApiService {
     return cacheInfo;
   }
 
-  // Limpiar cache completamente
   clearCache(): void {
     this.cache.clear();
-    if (process.env.NODE_ENV === 'development') {
-    }
   }
 
-  // Configurar TTL del cache
   setCacheTTL(ttl: number): void {
-    if (ttl > 0 && ttl <= 60 * 60 * 1000) { // Máximo 1 hora
-      this.CACHE_TTL = ttl;
+    if (ttl > 0 && ttl <= 60 * 60 * 1000) {
+      // Actualizar TTL
     }
   }
 
-  // Obtener TTL actual del cache
   getCacheTTL(): number {
     return this.CACHE_TTL;
   }
 
-  // Configurar delay de debounce para búsquedas
   setSearchDebounceDelay(delay: number): void {
-    if (delay >= 100 && delay <= 2000) { // Entre 100ms y 2s
-      // Configurar debounce delay
+    if (delay >= 100 && delay <= 2000) {
+      // Configurar debounce
     }
   }
 
-  // Obtener delay actual de debounce
   getSearchDebounceDelay(): number {
     return this.SEARCH_DEBOUNCE_DELAY;
   }
 
-  // Estado del circuit breaker
   getCircuitBreakerState(): {
     state: string;
     failures: number;
@@ -1110,53 +1860,46 @@ class ApiService {
     return state;
   }
 
-  // Reset manual del circuit breaker
   resetCircuitBreaker(): void {
     this.circuitBreakerState = 'CLOSED';
     this.circuitBreakerFailures = 0;
     this.circuitBreakerLastFailureTime = 0;
   }
 
-  // Métodos específicos para invalidar cache después de operaciones que cambian datos
+  // Cache invalidation methods
   invalidateUserCache(): void {
-    this.invalidateCache('/api/users');
-    this.invalidateCache('/api/auth/me');
+    this.invalidateCache('getUser');
+    this.invalidateCache('getCurrentUser');
   }
 
   invalidateContentCache(): void {
-    this.invalidateCache('/api/content');
+    this.invalidateCache('getContent');
   }
 
   invalidateSubscriptionCache(): void {
-    this.invalidateCache('/api/subscriptions');
+    this.invalidateCache('Subscription');
   }
 
   invalidatePaymentCache(): void {
-    this.invalidateCache('/api/payments');
+    this.invalidateCache('Payment');
   }
 
   invalidateMessageCache(): void {
-    this.invalidateCache('/api/messages');
+    this.invalidateCache('Message');
   }
 
   invalidateNotificationCache(): void {
-    this.invalidateCache('/api/notifications');
+    this.invalidateCache('Notification');
   }
 
-  // Optimización específica para operaciones que requieren datos frescos
   async requestFreshData<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    retryOnUnauthorized: boolean = true
+    queryName: string,
+    fn: () => Promise<{ data: T | null; error: any }>
   ): Promise<ApiResponse<T>> {
-    // Invalidar cache para este endpoint específico
-    this.invalidateCache(endpoint);
-    
-    // Hacer request sin cache
-    return this.request<T>(endpoint, options, retryOnUnauthorized, false);
+    this.invalidateCache(queryName);
+    return this.supabaseRequest(queryName, fn, false);
   }
 
-  // Obtener métricas de rendimiento para debugging
   getDetailedMetrics(): {
     cache: {
       size: number;
@@ -1186,7 +1929,6 @@ class ApiService {
       ttl: entry.ttl
     }));
 
-    // Cálculos aproximados de métricas de rendimiento
     const cacheHitRate = cacheEntries.length > 0 ? Math.min(100, cacheEntries.length * 10) : 0;
     const cacheEfficiency = Math.min(100, (this.cache.size / this.MAX_CACHE_SIZE) * 100);
 
@@ -1207,40 +1949,34 @@ class ApiService {
         threshold: this.CIRCUIT_BREAKER_THRESHOLD
       },
       performance: {
-        averageCacheHitTime: 10, // Estimado en ms
-        averageRequestTime: 150, // Estimado en ms
+        averageCacheHitTime: 10,
+        averageRequestTime: 150,
         cacheEfficiency
       }
     };
   }
 
-  // ==================== MÉTODOS DE DISCOVERY Y ANALYTICS ====================
-  
-  // Obtener recomendaciones
+  // ==================== DISCOVERY Y ANALYTICS ====================
   async getRecommendations(params: { limit?: number; refresh?: boolean } = {}): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(50);
     return getMockRecommendations(params);
   }
 
-  // Obtener contenido trending
   async getTrendingContent(): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(30);
     return getMockTrendingContent();
   }
 
-  // Obtener contenido discover
   async getDiscoverContent(params: any = {}): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(40);
     return getMockDiscoverContent(params);
   }
 
-  // Track de eventos de analytics
   async trackAnalytics(event: string, data: any = {}): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(20);
     return trackMockAnalytics(event);
   }
 
-  // Track de interacciones de recomendaciones
   async trackRecommendationInteraction(contentId: string, action: 'view' | 'like' | 'share' | 'comment'): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(15);
     return {
@@ -1250,7 +1986,6 @@ class ApiService {
     };
   }
 
-  // Track de eventos de sesión
   async trackSessionEvent(event: 'start' | 'end' | 'activity', data: any = {}): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(10);
     return {
@@ -1264,7 +1999,6 @@ class ApiService {
     };
   }
 
-  // Track de búsquedas
   async trackSearchQuery(query: string, results: number = 0): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(10);
     return {
@@ -1274,27 +2008,27 @@ class ApiService {
     };
   }
 
-  // Obtener datos de comportamiento del usuario
   async getUserBehavior(): Promise<ApiResponse<any>> {
     await simulateNetworkDelay(30);
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
+    }
+
     return {
       success: true,
       data: {
-        userId: 'user_1',
-        viewedContent: mockContent.slice(0, 10).map(c => c.id),
-        likedContent: mockContent.slice(0, 5).map(c => c.id),
-        followedCreators: mockUsers.slice(0, 8).map(u => u.id),
-        searchQueries: ['fitness', 'cooking', 'music', 'travel'],
-        sessionDuration: 1800, // 30 minutos
+        userId: user.id,
+        viewedContent: [],
+        likedContent: [],
+        followedCreators: [],
+        searchQueries: [],
+        sessionDuration: 1800,
         engagementRate: 75.5,
         preferredContentTypes: ['video', 'image'],
-        timeSpentPerCategory: {
-          'lifestyle': 25,
-          'fitness': 20,
-          'cooking': 15,
-          'music': 10,
-          'travel': 30
-        },
+        timeSpentPerCategory: {},
         lastActive: new Date().toISOString()
       },
       timestamp: new Date().toISOString()
