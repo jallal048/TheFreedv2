@@ -1,15 +1,14 @@
-// PublicProfilePage - Página de perfil público para TheFreed.v1
+// PublicProfilePage - Página de perfil público para TheFreed.v2
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContextSupabase';
 import { apiService } from '../../services/api';
-import { User, CreatorProfile, Content } from '../../types';
+import { User, Content } from '../../types';
 import { 
   ArrowLeft,
   UserPlus,
   UserMinus,
   MessageCircle,
-  MapPin,
   Globe,
   CheckCircle,
   Grid,
@@ -28,19 +27,18 @@ import {
 
 // Componente para mostrar la información del usuario público
 const UserHeader: React.FC<{
-  publicUser: User & { profile?: CreatorProfile };
+  publicUser: User;
   isFollowing: boolean;
+  isLoadingFollow: boolean;
   onFollowToggle: () => void;
   onMessage: () => void;
-}> = ({ publicUser, isFollowing, onFollowToggle, onMessage }) => {
-  // Memoizar el nombre completo para optimizar renders
+}> = ({ publicUser, isFollowing, isLoadingFollow, onFollowToggle, onMessage }) => {
   const fullName = useMemo(() => {
     return publicUser.profile?.displayName || 
            `${publicUser.firstName} ${publicUser.lastName}`.trim() || 
            publicUser.username;
   }, [publicUser]);
 
-  // Memoizar la bio para evitar recreaciones
   const bio = useMemo(() => {
     return publicUser.profile?.bio || 'No hay biografía disponible';
   }, [publicUser.profile?.bio]);
@@ -112,19 +110,36 @@ const UserHeader: React.FC<{
                   <p className="text-gray-700 mt-4 max-w-2xl leading-relaxed">
                     {bio}
                   </p>
+
+                  {/* Categorías */}
+                  {publicUser.profile?.categories && publicUser.profile.categories.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      {publicUser.profile.categories.map((category: string) => (
+                        <span
+                          key={category}
+                          className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-medium"
+                        >
+                          {category}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Botones de acción */}
                 <div className="flex items-center gap-3 mt-4 md:mt-0 md:ml-6">
                   <button
                     onClick={onFollowToggle}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                    disabled={isLoadingFollow}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       isFollowing
                         ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                         : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
-                    {isFollowing ? (
+                    {isLoadingFollow ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isFollowing ? (
                       <>
                         <UserMinus className="h-4 w-4" />
                         <span>Dejar de seguir</span>
@@ -142,7 +157,7 @@ const UserHeader: React.FC<{
                     className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
                   >
                     <MessageCircle className="h-4 w-4" />
-                    <span>Enviar mensaje</span>
+                    <span className="hidden md:inline">Mensaje</span>
                   </button>
 
                   <button className="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
@@ -171,7 +186,6 @@ const UserStats: React.FC<{
     totalViews: number;
   };
 }> = ({ stats }) => {
-  // Memoizar el formato de números
   const formatNumber = useCallback((num: number): string => {
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1) + 'M';
@@ -224,7 +238,6 @@ const ContentGrid: React.FC<{
   viewMode: 'grid' | 'list';
   onViewModeChange: (mode: 'grid' | 'list') => void;
 }> = memo(({ contents, viewMode, onViewModeChange }) => {
-  // Memoizar el componente de tarjeta de contenido
   const ContentCard = useMemo(() => memo(({ content }: { content: Content }) => (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow cursor-pointer group">
       {/* Thumbnail */}
@@ -253,19 +266,12 @@ const ContentGrid: React.FC<{
               Premium
             </span>
           )}
-          {content.isNSFW && (
+          {content.isNsfw && (
             <span className="bg-red-500 text-white text-xs px-2 py-1 rounded font-medium">
               +18
             </span>
           )}
         </div>
-
-        {/* Duración para videos */}
-        {content.duration && (
-          <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-            {Math.floor(content.duration / 60)}:{(content.duration % 60).toString().padStart(2, '0')}
-          </div>
-        )}
       </div>
 
       {/* Content info */}
@@ -285,18 +291,12 @@ const ContentGrid: React.FC<{
           <div className="flex items-center space-x-4">
             <div className="flex items-center gap-1">
               <Eye className="h-4 w-4" />
-              <span>{content.views}</span>
+              <span>{content.views || 0}</span>
             </div>
             <div className="flex items-center gap-1">
               <Heart className="h-4 w-4" />
-              <span>{content.likesCount}</span>
+              <span>{content.likesCount || 0}</span>
             </div>
-            {content.downloads > 0 && (
-              <div className="flex items-center gap-1">
-                <Download className="h-4 w-4" />
-                <span>{content.downloads}</span>
-              </div>
-            )}
           </div>
           
           <div className="text-xs">
@@ -305,9 +305,9 @@ const ContentGrid: React.FC<{
         </div>
 
         {/* Tags */}
-        {content.tags.length > 0 && (
+        {content.tags && content.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-3">
-            {content.tags.slice(0, 3).map((tag) => (
+            {content.tags.slice(0, 3).map((tag: string) => (
               <span
                 key={tag}
                 className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded"
@@ -396,38 +396,32 @@ const ContentGrid: React.FC<{
 const PublicProfilePageContent: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
   const { user: currentUser } = useAuth();
+  const navigate = useNavigate();
   
   // Estados
-  const [publicUser, setPublicUser] = useState<User & { profile?: CreatorProfile } | null>(null);
+  const [publicUser, setPublicUser] = useState<User | null>(null);
   const [contents, setContents] = useState<Content[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingFollow, setIsLoadingFollow] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [error, setError] = useState<string | null>(null);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
 
   // Memoizar estadísticas del usuario
   const userStats = useMemo(() => {
     if (!publicUser) return { posts: 0, followers: 0, following: 0, totalViews: 0 };
     
     return {
-      posts: publicUser.profile?.totalContent || 0,
-      followers: publicUser.profile?.followerCount || 0,
-      following: 0, // Necesitaríamos una API diferente para obtener esto
+      posts: contents.length,
+      followers: followersCount,
+      following: followingCount,
       totalViews: publicUser.profile?.totalViews || 0,
     };
-  }, [publicUser]);
+  }, [publicUser, contents.length, followersCount, followingCount]);
 
-  // Memoizar función de formato de números
-  const formatNumber = useCallback((num: number): string => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  }, []);
-
-  // Memoizar función de carga de datos
+  // Cargar datos del perfil
   const loadProfileData = useCallback(async () => {
     if (!userId) return;
     
@@ -435,15 +429,15 @@ const PublicProfilePageContent: React.FC = () => {
     setError(null);
     
     try {
-      // Cargar datos del usuario público
-      const userResponse = await apiService.getUserById(userId);
-      if (userResponse.success && userResponse.data) {
-        setPublicUser(userResponse.data);
+      // Cargar datos del usuario público usando getUser(id)
+      const userResponse = await apiService.getUser(userId);
+      
+      if (userResponse.success && userResponse.data?.user) {
+        setPublicUser(userResponse.data.user);
         
         // Cargar contenido público del usuario
         const contentResponse = await apiService.getContent({ 
-          creatorId: userId, 
-          isPublic: true,
+          creatorId: userId,
           page: 1, 
           limit: 50 
         });
@@ -452,10 +446,31 @@ const PublicProfilePageContent: React.FC = () => {
           setContents(contentResponse.data);
         }
         
-        // Verificar si el usuario actual sigue a este usuario
-        if (currentUser) {
-          // Aquí implementaríamos la lógica para verificar si se sigue
-          setIsFollowing(false); // Placeholder
+        // Cargar seguidores y siguiendo
+        try {
+          const followersResponse = await apiService.getFollowers(userId);
+          if (followersResponse.success && followersResponse.data) {
+            setFollowersCount(followersResponse.data.length);
+            
+            // Verificar si el usuario actual sigue a este usuario
+            if (currentUser) {
+              const isCurrentUserFollowing = followersResponse.data.some(
+                (follower: any) => follower.id === currentUser.id
+              );
+              setIsFollowing(isCurrentUserFollowing);
+            }
+          }
+        } catch (err) {
+          console.error('Error loading followers:', err);
+        }
+
+        try {
+          const followingResponse = await apiService.getFollowing(userId);
+          if (followingResponse.success && followingResponse.data) {
+            setFollowingCount(followingResponse.data.length);
+          }
+        } catch (err) {
+          console.error('Error loading following:', err);
         }
       } else {
         setError('Usuario no encontrado');
@@ -468,42 +483,45 @@ const PublicProfilePageContent: React.FC = () => {
     }
   }, [userId, currentUser]);
 
-  // Memoizar handlers
+  // Handler para seguir/dejar de seguir
   const handleFollowToggle = useCallback(async () => {
-    if (!publicUser || !currentUser) return;
+    if (!publicUser || !currentUser) {
+      // Redirigir al login si no está autenticado
+      navigate('/auth/login');
+      return;
+    }
+    
+    setIsLoadingFollow(true);
     
     try {
-      if (isFollowing) {
-        await apiService.unfollowUser(publicUser.id);
-        setIsFollowing(false);
-        setPublicUser(prev => prev ? {
-          ...prev,
-          profile: prev.profile ? {
-            ...prev.profile,
-            followerCount: Math.max(0, prev.profile.followerCount - 1)
-          } : undefined
-        } : null);
-      } else {
-        await apiService.followUser(publicUser.id);
-        setIsFollowing(true);
-        setPublicUser(prev => prev ? {
-          ...prev,
-          profile: prev.profile ? {
-            ...prev.profile,
-            followerCount: prev.profile.followerCount + 1
-          } : undefined
-        } : null);
+      const response = await apiService.followUser(publicUser.id);
+      
+      if (response.success && response.data) {
+        const newFollowingState = response.data.following;
+        setIsFollowing(newFollowingState);
+        
+        // Actualizar contador de seguidores
+        setFollowersCount(prev => newFollowingState ? prev + 1 : Math.max(0, prev - 1));
       }
     } catch (err) {
       console.error('Error toggling follow:', err);
+      alert('Error al seguir/dejar de seguir. Inténtalo de nuevo.');
+    } finally {
+      setIsLoadingFollow(false);
     }
-  }, [publicUser, currentUser, isFollowing]);
+  }, [publicUser, currentUser, navigate]);
 
+  // Handler para enviar mensaje
   const handleMessage = useCallback(() => {
-    if (!publicUser) return;
-    // Navegar a la página de mensajes o abrir modal
-  }, [publicUser]);
+    if (!publicUser || !currentUser) {
+      navigate('/auth/login');
+      return;
+    }
+    // Navegar a la página de mensajes con este usuario
+    navigate(`/messages/${publicUser.id}`);
+  }, [publicUser, currentUser, navigate]);
 
+  // Handler para cambiar modo de vista
   const handleViewModeChange = useCallback((mode: 'grid' | 'list') => {
     setViewMode(mode);
   }, []);
@@ -588,6 +606,7 @@ const PublicProfilePageContent: React.FC = () => {
       <UserHeader
         publicUser={publicUser}
         isFollowing={isFollowing}
+        isLoadingFollow={isLoadingFollow}
         onFollowToggle={handleFollowToggle}
         onMessage={handleMessage}
       />
