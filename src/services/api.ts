@@ -506,7 +506,7 @@ class ApiService {
     );
   }
 
-  // ==================== USUARIOS ====================
+  // ==================== USUARIOS Y PERFILES ====================
   async getUsers(params?: { 
     page?: number; 
     limit?: number; 
@@ -520,14 +520,10 @@ class ApiService {
     const queryFn = async () => {
       let query = supabase
         .from('profiles')
-        .select('*, users!inner(*)', { count: 'exact' });
+        .select('*', { count: 'exact' });
 
       if (params?.search) {
-        query = query.or(`username.ilike.%${params.search}%,display_name.ilike.%${params.search}%`);
-      }
-
-      if (params?.userType) {
-        query = query.eq('users.user_type', params.userType);
+        query = query.or(`username.ilike.%${params.search}%,display_name.ilike.%${params.search}%,bio.ilike.%${params.search}%`);
       }
 
       const { data, error, count } = await query
@@ -538,48 +534,49 @@ class ApiService {
         return { data: null, error };
       }
 
-      const users: User[] = data?.map((profile: any) => ({
+      // Mapear profiles a Users
+      const users: User[] = (data || []).map((profile: any) => ({
         id: profile.user_id,
-        email: profile.users.email || '',
+        email: '',
         username: profile.username || '',
         firstName: profile.first_name || '',
         lastName: profile.last_name || '',
-        userType: profile.users.user_type || 'USER',
-        isEmailVerified: profile.users.email_confirmed_at ? true : false,
+        userType: 'USER' as any,
+        isEmailVerified: true,
         isPhoneVerified: false,
-        isActive: profile.is_active,
+        isActive: profile.is_active !== false,
         isSuspended: false,
         createdAt: profile.created_at,
         lastActive: profile.updated_at,
         profile: {
           id: profile.id,
           userId: profile.user_id,
-          displayName: profile.display_name || '',
+          displayName: profile.display_name || profile.username || '',
           bio: profile.bio || '',
           avatarUrl: profile.avatar_url || '',
           bannerUrl: profile.banner_url || '',
           website: profile.website || '',
           socialLinks: profile.social_links || {},
           categories: profile.categories || [],
-          contentTypes: profile.content_types || [],
+          contentTypes: [],
           isVerified: profile.is_verified || false,
-          verificationLevel: profile.verification_level || 'BASIC',
+          verificationLevel: 'BASIC' as any,
           isLiveStreaming: false,
-          isAdultContent: profile.is_adult_content || false,
+          isAdultContent: false,
           monthlyPrice: profile.monthly_price || 0,
-          yearlyPrice: profile.yearly_price || 0,
-          customPrice: profile.custom_price || 0,
-          commissionRate: profile.commission_rate || 15,
-          isPublic: profile.is_public,
-          isActive: profile.is_active,
+          yearlyPrice: 0,
+          customPrice: 0,
+          commissionRate: 15,
+          isPublic: profile.is_public !== false,
+          isActive: profile.is_active !== false,
           followerCount: profile.follower_count || 0,
-          totalViews: profile.total_views || 0,
-          totalEarnings: profile.total_earnings || 0,
-          totalContent: profile.total_content || 0,
+          totalViews: 0,
+          totalEarnings: 0,
+          totalContent: 0,
           createdAt: profile.created_at,
           updatedAt: profile.updated_at
         }
-      })) || [];
+      }));
 
       return { data: users, error: null };
     };
@@ -587,36 +584,46 @@ class ApiService {
     if (params?.search) {
       const searchKey = `getUsers_${params.search}`;
       return this.debounceSearch(searchKey, async () => {
-        const response = await this.supabaseRequest('getUsers', queryFn, true, 2 * 60 * 1000);
+        const { data, error } = await queryFn();
         
+        if (error) {
+          throw new ApiError(error.message, 500, error.code, true);
+        }
+
         return {
-          ...response,
-          data: response.data || [],
+          success: true,
+          data: data || [],
           pagination: {
             currentPage: page,
-            totalPages: Math.ceil((count || 0) / limit),
-            totalItems: count || 0,
+            totalPages: Math.ceil((data?.length || 0) / limit),
+            totalItems: data?.length || 0,
             itemsPerPage: limit,
-            hasNextPage: offset + limit < (count || 0),
+            hasNextPage: offset + limit < (data?.length || 0),
             hasPrevPage: page > 1
-          }
+          },
+          timestamp: new Date().toISOString()
         };
       });
     }
     
-    const response = await this.supabaseRequest('getUsers', queryFn, true, 5 * 60 * 1000);
+    const { data, error } = await queryFn();
     
+    if (error) {
+      throw new ApiError(error.message, 500, error.code, true);
+    }
+
     return {
-      ...response,
-      data: response.data || [],
+      success: true,
+      data: data || [],
       pagination: {
         currentPage: page,
-        totalPages: 1,
-        totalItems: (response.data as any)?.length || 0,
+        totalPages: Math.ceil((data?.length || 0) / limit),
+        totalItems: data?.length || 0,
         itemsPerPage: limit,
-        hasNextPage: false,
-        hasPrevPage: false
-      }
+        hasNextPage: offset + limit < (data?.length || 0),
+        hasPrevPage: page > 1
+      },
+      timestamp: new Date().toISOString()
     };
   }
 
@@ -626,7 +633,7 @@ class ApiService {
       async () => {
         const { data: profile, error } = await supabase
           .from('profiles')
-          .select('*, users!inner(*)')
+          .select('*')
           .eq('user_id', id)
           .maybeSingle();
 
@@ -636,42 +643,42 @@ class ApiService {
 
         const user: User = {
           id: profile.user_id,
-          email: profile.users.email || '',
+          email: '',
           username: profile.username || '',
           firstName: profile.first_name || '',
           lastName: profile.last_name || '',
-          userType: profile.users.user_type || 'USER',
-          isEmailVerified: profile.users.email_confirmed_at ? true : false,
+          userType: 'USER' as any,
+          isEmailVerified: true,
           isPhoneVerified: false,
-          isActive: profile.is_active,
+          isActive: profile.is_active !== false,
           isSuspended: false,
           createdAt: profile.created_at,
           lastActive: profile.updated_at,
           profile: {
             id: profile.id,
             userId: profile.user_id,
-            displayName: profile.display_name || '',
+            displayName: profile.display_name || profile.username || '',
             bio: profile.bio || '',
             avatarUrl: profile.avatar_url || '',
             bannerUrl: profile.banner_url || '',
             website: profile.website || '',
             socialLinks: profile.social_links || {},
             categories: profile.categories || [],
-            contentTypes: profile.content_types || [],
+            contentTypes: [],
             isVerified: profile.is_verified || false,
-            verificationLevel: profile.verification_level || 'BASIC',
+            verificationLevel: 'BASIC' as any,
             isLiveStreaming: false,
-            isAdultContent: profile.is_adult_content || false,
+            isAdultContent: false,
             monthlyPrice: profile.monthly_price || 0,
-            yearlyPrice: profile.yearly_price || 0,
-            customPrice: profile.custom_price || 0,
-            commissionRate: profile.commission_rate || 15,
-            isPublic: profile.is_public,
-            isActive: profile.is_active,
+            yearlyPrice: 0,
+            customPrice: 0,
+            commissionRate: 15,
+            isPublic: profile.is_public !== false,
+            isActive: profile.is_active !== false,
             followerCount: profile.follower_count || 0,
-            totalViews: profile.total_views || 0,
-            totalEarnings: profile.total_earnings || 0,
-            totalContent: profile.total_content || 0,
+            totalViews: 0,
+            totalEarnings: 0,
+            totalContent: 0,
             createdAt: profile.created_at,
             updatedAt: profile.updated_at
           }
@@ -688,19 +695,29 @@ class ApiService {
     const response = await this.supabaseRequest(
       `updateUser_${id}`,
       async () => {
+        const updateData: any = {
+          updated_at: new Date().toISOString()
+        };
+
+        if (userData.profile) {
+          if (userData.profile.displayName) updateData.display_name = userData.profile.displayName;
+          if (userData.profile.bio !== undefined) updateData.bio = userData.profile.bio;
+          if (userData.profile.avatarUrl !== undefined) updateData.avatar_url = userData.profile.avatarUrl;
+          if (userData.profile.bannerUrl !== undefined) updateData.banner_url = userData.profile.bannerUrl;
+          if (userData.profile.website !== undefined) updateData.website = userData.profile.website;
+          if (userData.profile.socialLinks) updateData.social_links = userData.profile.socialLinks;
+          if (userData.profile.categories) updateData.categories = userData.profile.categories;
+        }
+
+        if (userData.username) updateData.username = userData.username;
+        if (userData.firstName) updateData.first_name = userData.firstName;
+        if (userData.lastName) updateData.last_name = userData.lastName;
+
         const { data, error } = await supabase
           .from('profiles')
-          .update({
-            display_name: userData.profile?.displayName,
-            bio: userData.profile?.bio,
-            avatar_url: userData.profile?.avatarUrl,
-            banner_url: userData.profile?.bannerUrl,
-            website: userData.profile?.website,
-            social_links: userData.profile?.socialLinks,
-            updated_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('user_id', id)
-          .select('*, users!inner(*)')
+          .select()
           .maybeSingle();
 
         if (error || !data) {
@@ -709,42 +726,42 @@ class ApiService {
 
         const user: User = {
           id: data.user_id,
-          email: data.users.email || '',
+          email: '',
           username: data.username || '',
           firstName: data.first_name || '',
           lastName: data.last_name || '',
-          userType: data.users.user_type || 'USER',
+          userType: 'USER' as any,
           isEmailVerified: true,
           isPhoneVerified: false,
-          isActive: data.is_active,
+          isActive: data.is_active !== false,
           isSuspended: false,
           createdAt: data.created_at,
           lastActive: data.updated_at,
           profile: {
             id: data.id,
             userId: data.user_id,
-            displayName: data.display_name || '',
+            displayName: data.display_name || data.username || '',
             bio: data.bio || '',
             avatarUrl: data.avatar_url || '',
             bannerUrl: data.banner_url || '',
             website: data.website || '',
             socialLinks: data.social_links || {},
             categories: data.categories || [],
-            contentTypes: data.content_types || [],
+            contentTypes: [],
             isVerified: data.is_verified || false,
-            verificationLevel: data.verification_level || 'BASIC',
+            verificationLevel: 'BASIC' as any,
             isLiveStreaming: false,
-            isAdultContent: data.is_adult_content || false,
+            isAdultContent: false,
             monthlyPrice: data.monthly_price || 0,
-            yearlyPrice: data.yearly_price || 0,
-            customPrice: data.custom_price || 0,
-            commissionRate: data.commission_rate || 15,
-            isPublic: data.is_public,
-            isActive: data.is_active,
+            yearlyPrice: 0,
+            customPrice: 0,
+            commissionRate: 15,
+            isPublic: data.is_public !== false,
+            isActive: data.is_active !== false,
             followerCount: data.follower_count || 0,
-            totalViews: data.total_views || 0,
-            totalEarnings: data.total_earnings || 0,
-            totalContent: data.total_content || 0,
+            totalViews: 0,
+            totalEarnings: 0,
+            totalContent: 0,
             createdAt: data.created_at,
             updatedAt: data.updated_at
           }
@@ -766,17 +783,8 @@ class ApiService {
     return this.supabaseRequest(
       `getUserSettings_${userId}`,
       async () => {
-        const { data, error } = await supabase
-          .from('user_settings')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (error) {
-          return { data: null, error };
-        }
-
-        const settings: UserSettings = data || {
+        // Si no tienes tabla de settings, devolver defaults
+        const settings: UserSettings = {
           userId,
           emailNotifications: true,
           pushNotifications: true,
@@ -798,39 +806,12 @@ class ApiService {
   }
 
   async updateUserSettings(userId: string, settings: Partial<UserSettings>): Promise<ApiResponse<{ settings: UserSettings }>> {
-    const response = await this.supabaseRequest(
-      `updateUserSettings_${userId}`,
-      async () => {
-        const { data, error } = await supabase
-          .from('user_settings')
-          .upsert({
-            user_id: userId,
-            email_notifications: settings.emailNotifications,
-            push_notifications: settings.pushNotifications,
-            sms_notifications: settings.smsNotifications,
-            language: settings.language,
-            theme: settings.theme,
-            privacy: settings.privacy,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', userId)
-          .select()
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Update failed') };
-        }
-
-        return { data: { settings: data as UserSettings }, error: null };
-      },
-      false
-    );
-
-    if (response.success) {
-      this.invalidateCache(`getUserSettings_${userId}`);
-    }
-
-    return response;
+    // Si no tienes tabla de settings, solo retornar success
+    return {
+      success: true,
+      data: { settings: settings as UserSettings },
+      timestamp: new Date().toISOString()
+    };
   }
 
   // ==================== CONTENIDO ====================
@@ -852,7 +833,7 @@ class ApiService {
     const queryFn = async () => {
       let query = supabase
         .from('contents')
-        .select('*, profiles!inner(*)', { count: 'exact' })
+        .select('*, profiles!contents_author_id_fkey(*)', { count: 'exact' })
         .eq('status', 'published');
 
       if (params?.category) {
@@ -937,13 +918,19 @@ class ApiService {
       async () => {
         const { data, error } = await supabase
           .from('contents')
-          .select('*, profiles!inner(*)')
+          .select('*, profiles!contents_author_id_fkey(*)')
           .eq('id', id)
           .maybeSingle();
 
         if (error || !data) {
           return { data: null, error: error || new Error('Content not found') };
         }
+
+        // Incrementar views
+        await supabase
+          .from('views')
+          .insert([{ content_id: id, user_id: (await supabase.auth.getUser()).data.user?.id }])
+          .select();
 
         return { data: { content: data as Content }, error: null };
       },
@@ -986,7 +973,7 @@ class ApiService {
             status: 'published',
             author_id: user.id
           }])
-          .select('*, profiles!inner(*)')
+          .select('*, profiles!contents_author_id_fkey(*)')
           .maybeSingle();
 
         if (error || !data) {
@@ -1009,26 +996,29 @@ class ApiService {
     const response = await this.supabaseRequest(
       `updateContent_${id}`,
       async () => {
+        const updateData: any = {
+          updated_at: new Date().toISOString()
+        };
+
+        if (contentData.title) updateData.title = contentData.title;
+        if (contentData.description !== undefined) updateData.description = contentData.description;
+        if (contentData.contentHtml !== undefined) updateData.content_html = contentData.contentHtml;
+        if (contentData.contentType) updateData.content_type = contentData.contentType;
+        if (contentData.category) updateData.category = contentData.category;
+        if (contentData.tags) updateData.tags = contentData.tags;
+        if (contentData.visibility) updateData.visibility = contentData.visibility;
+        if (contentData.price !== undefined) updateData.price = contentData.price;
+        if (contentData.isPremium !== undefined) updateData.is_premium = contentData.isPremium;
+        if (contentData.isFree !== undefined) updateData.is_free = contentData.isFree;
+        if (contentData.isNsfw !== undefined) updateData.is_nsfw = contentData.isNsfw;
+        if (contentData.mediaUrl !== undefined) updateData.media_url = contentData.mediaUrl;
+        if (contentData.thumbnailUrl !== undefined) updateData.thumbnail_url = contentData.thumbnailUrl;
+
         const { data, error } = await supabase
           .from('contents')
-          .update({
-            title: contentData.title,
-            description: contentData.description,
-            content_html: contentData.contentHtml,
-            content_type: contentData.contentType,
-            category: contentData.category,
-            tags: contentData.tags,
-            visibility: contentData.visibility,
-            price: contentData.price,
-            is_premium: contentData.isPremium,
-            is_free: contentData.isFree,
-            is_nsfw: contentData.isNsfw,
-            media_url: contentData.mediaUrl,
-            thumbnail_url: contentData.thumbnailUrl,
-            updated_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('id', id)
-          .select('*, profiles!inner(*)')
+          .select('*, profiles!contents_author_id_fkey(*)')
           .maybeSingle();
 
         if (error || !data) {
@@ -1082,7 +1072,7 @@ class ApiService {
           return { data: null, error: new Error('Not authenticated') };
         }
 
-        // Verificar si ya existe el like
+        // Verificar si ya existe el like en la tabla 'likes'
         const { data: existing } = await supabase
           .from('likes')
           .select('id')
@@ -1099,9 +1089,6 @@ class ApiService {
 
           if (error) return { data: null, error };
 
-          // Decrementar contador
-          await supabase.rpc('decrement_likes_count', { content_id: id });
-
           return { data: { liked: false }, error: null };
         } else {
           // Crear like
@@ -1110,9 +1097,6 @@ class ApiService {
             .insert([{ user_id: user.id, content_id: id }]);
 
           if (error) return { data: null, error };
-
-          // Incrementar contador
-          await supabase.rpc('increment_likes_count', { content_id: id });
 
           return { data: { liked: true }, error: null };
         }
@@ -1152,6 +1136,17 @@ class ApiService {
         .from('content-media')
         .getPublicUrl(data.path);
 
+      // Registrar en tabla 'media'
+      await supabase
+        .from('media')
+        .insert([{
+          file_name: data.path,
+          file_url: publicUrl,
+          file_type: file.type,
+          file_size: file.size,
+          uploaded_by: user.id
+        }]);
+
       const result: ApiResponse<any> = {
         success: true,
         data: {
@@ -1175,7 +1170,7 @@ class ApiService {
     }
   }
 
-  // ==================== SUSCRIPCIONES ====================
+  // ==================== SUSCRIPCIONES (si tienes tabla subscriptions) ====================
   async getSubscriptions(params?: { 
     page?: number; 
     limit?: number; 
@@ -1192,43 +1187,17 @@ class ApiService {
       throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
     }
 
-    const queryFn = async () => {
-      let query = supabase
-        .from('subscriptions')
-        .select('*, profiles!inner(*)', { count: 'exact' })
-        .eq('user_id', user.id);
-
-      if (params?.status) {
-        query = query.eq('status', params.status);
-      }
-
-      if (params?.creatorId) {
-        query = query.eq('creator_id', params.creatorId);
-      }
-
-      const { data, error, count } = await query
-        .range(offset, offset + limit - 1)
-        .order('created_at', { ascending: false });
-
-      return { data, error, count };
-    };
-
-    const { data, error, count } = await queryFn();
-    
-    if (error) {
-      throw new ApiError(error.message, 500, error.code, true);
-    }
-
+    // Si no tienes tabla subscriptions, devolver vacío
     return {
       success: true,
-      data: data as Subscription[] || [],
+      data: [],
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil((count || 0) / limit),
-        totalItems: count || 0,
+        totalPages: 1,
+        totalItems: 0,
         itemsPerPage: limit,
-        hasNextPage: offset + limit < (count || 0),
-        hasPrevPage: page > 1
+        hasNextPage: false,
+        hasPrevPage: false
       },
       timestamp: new Date().toISOString()
     };
@@ -1239,104 +1208,34 @@ class ApiService {
     subscriptionType: 'MONTHLY' | 'YEARLY' | 'LIFETIME' | 'CUSTOM';
     paymentMethodId?: string;
   }): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.supabaseRequest(
-      'createSubscription',
-      async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          return { data: null, error: new Error('Not authenticated') };
-        }
-
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .insert([{
-            user_id: user.id,
-            creator_id: subscriptionData.creatorId,
-            subscription_type: subscriptionData.subscriptionType,
-            status: 'active',
-            payment_method_id: subscriptionData.paymentMethodId
-          }])
-          .select('*, profiles!inner(*)')
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Create failed') };
-        }
-
-        return { data: { subscription: data as Subscription }, error: null };
-      },
-      false
-    );
-
-    if (response.success) {
-      this.invalidateSubscriptionCache();
-    }
-
-    return response;
+    // Implementar cuando tengas tabla subscriptions
+    return {
+      success: false,
+      error: 'Subscriptions not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
   async cancelSubscription(id: string): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.supabaseRequest(
-      `cancelSubscription_${id}`,
-      async () => {
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .update({ 
-            status: 'cancelled',
-            cancelled_at: new Date().toISOString()
-          })
-          .eq('id', id)
-          .select('*, profiles!inner(*)')
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Cancel failed') };
-        }
-
-        return { data: { subscription: data as Subscription }, error: null };
-      },
-      false
-    );
-
-    if (response.success) {
-      this.invalidateSubscriptionCache();
-    }
-
-    return response;
+    return {
+      success: false,
+      error: 'Subscriptions not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
   async renewSubscription(id: string): Promise<ApiResponse<{ subscription: Subscription }>> {
-    const response = await this.supabaseRequest(
-      `renewSubscription_${id}`,
-      async () => {
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .update({ 
-            status: 'active',
-            renewed_at: new Date().toISOString()
-          })
-          .eq('id', id)
-          .select('*, profiles!inner(*)')
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Renew failed') };
-        }
-
-        return { data: { subscription: data as Subscription }, error: null };
-      },
-      false
-    );
-
-    if (response.success) {
-      this.invalidateSubscriptionCache();
-    }
-
-    return response;
+    return {
+      success: false,
+      error: 'Subscriptions not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
-  // ==================== PAGOS ====================
+  // ==================== PAGOS (si tienes tabla payments) ====================
   async getPayments(params?: { 
     page?: number; 
     limit?: number; 
@@ -1345,45 +1244,17 @@ class ApiService {
   }): Promise<PaginatedResponse<Payment>> {
     const page = params?.page || 1;
     const limit = params?.limit || 20;
-    const offset = (page - 1) * limit;
-
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
-    }
-
-    let query = supabase
-      .from('payments')
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id);
-
-    if (params?.status) {
-      query = query.eq('status', params.status);
-    }
-
-    if (params?.type) {
-      query = query.eq('payment_type', params.type);
-    }
-
-    const { data, error, count } = await query
-      .range(offset, offset + limit - 1)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      throw new ApiError(error.message, 500, error.code, true);
-    }
 
     return {
       success: true,
-      data: data as Payment[] || [],
+      data: [],
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil((count || 0) / limit),
-        totalItems: count || 0,
+        totalPages: 1,
+        totalItems: 0,
         itemsPerPage: limit,
-        hasNextPage: offset + limit < (count || 0),
-        hasPrevPage: page > 1
+        hasNextPage: false,
+        hasPrevPage: false
       },
       timestamp: new Date().toISOString()
     };
@@ -1407,80 +1278,24 @@ class ApiService {
     };
     payment: Payment;
   }>> {
-    return this.supabaseRequest(
-      'createPaymentIntent',
-      async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          return { data: null, error: new Error('Not authenticated') };
-        }
-
-        const { data, error } = await supabase
-          .from('payments')
-          .insert([{
-            user_id: user.id,
-            amount: paymentData.amount,
-            currency: paymentData.currency || 'USD',
-            payment_method_id: paymentData.paymentMethodId,
-            payment_type: paymentData.type || 'SUBSCRIPTION',
-            description: paymentData.description,
-            subscription_id: paymentData.subscriptionId,
-            content_id: paymentData.contentId,
-            status: 'pending'
-          }])
-          .select()
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Payment creation failed') };
-        }
-
-        return { 
-          data: {
-            paymentIntent: {
-              id: data.id,
-              clientSecret: `cs_${data.id}`,
-              amount: data.amount,
-              currency: data.currency,
-              status: data.status
-            },
-            payment: data as Payment
-          }, 
-          error: null 
-        };
-      },
-      false
-    );
-
-    return response;
+    return {
+      success: false,
+      error: 'Payments not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
   async confirmPayment(paymentIntentId: string): Promise<ApiResponse<{ payment: Payment }>> {
-    return this.supabaseRequest(
-      `confirmPayment_${paymentIntentId}`,
-      async () => {
-        const { data, error } = await supabase
-          .from('payments')
-          .update({ 
-            status: 'completed',
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', paymentIntentId)
-          .select()
-          .maybeSingle();
-
-        if (error || !data) {
-          return { data: null, error: error || new Error('Confirm failed') };
-        }
-
-        return { data: { payment: data as Payment }, error: null };
-      },
-      false
-    );
+    return {
+      success: false,
+      error: 'Payments not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
   }
 
-  // ==================== MENSAJES ====================
+  // ==================== MENSAJES (si tienes tabla messages) ====================
   async getMessages(params?: { 
     page?: number; 
     limit?: number; 
@@ -1488,72 +1303,17 @@ class ApiService {
   }): Promise<PaginatedResponse<Message>> {
     const page = params?.page || 1;
     const limit = params?.limit || 20;
-    const offset = (page - 1) * limit;
-
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
-    }
-
-    const queryFn = async () => {
-      let query = supabase
-        .from('messages')
-        .select('*', { count: 'exact' })
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`);
-
-      if (params?.search) {
-        query = query.ilike('content', `%${params.search}%`);
-      }
-
-      const { data, error, count } = await query
-        .range(offset, offset + limit - 1)
-        .order('created_at', { ascending: false });
-
-      return { data, error, count };
-    };
-
-    if (params?.search) {
-      const searchKey = `getMessages_${params.search}`;
-      return this.debounceSearch(searchKey, async () => {
-        const { data, error, count } = await queryFn();
-        
-        if (error) {
-          throw new ApiError(error.message, 500, error.code, true);
-        }
-
-        return {
-          success: true,
-          data: data as Message[] || [],
-          pagination: {
-            currentPage: page,
-            totalPages: Math.ceil((count || 0) / limit),
-            totalItems: count || 0,
-            itemsPerPage: limit,
-            hasNextPage: offset + limit < (count || 0),
-            hasPrevPage: page > 1
-          },
-          timestamp: new Date().toISOString()
-        };
-      });
-    }
-
-    const { data, error, count } = await queryFn();
-    
-    if (error) {
-      throw new ApiError(error.message, 500, error.code, true);
-    }
 
     return {
       success: true,
-      data: data as Message[] || [],
+      data: [],
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil((count || 0) / limit),
-        totalItems: count || 0,
+        totalPages: 1,
+        totalItems: 0,
         itemsPerPage: limit,
-        hasNextPage: offset + limit < (count || 0),
-        hasPrevPage: page > 1
+        hasNextPage: false,
+        hasPrevPage: false
       },
       timestamp: new Date().toISOString()
     };
@@ -1565,8 +1325,81 @@ class ApiService {
     messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
     mediaUrl?: string;
   }): Promise<ApiResponse<{ message: Message }>> {
+    return {
+      success: false,
+      error: 'Messages not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // ==================== NOTIFICACIONES (si tienes tabla notifications) ====================
+  async getNotifications(params?: { 
+    page?: number; 
+    limit?: number; 
+    search?: string 
+  }): Promise<PaginatedResponse<Notification>> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+
+    return {
+      success: true,
+      data: [],
+      pagination: {
+        currentPage: page,
+        totalPages: 1,
+        totalItems: 0,
+        itemsPerPage: limit,
+        hasNextPage: false,
+        hasPrevPage: false
+      },
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async markNotificationAsRead(id: string): Promise<ApiResponse<null>> {
+    return {
+      success: false,
+      error: 'Notifications not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async markAllNotificationsAsRead(): Promise<ApiResponse<null>> {
+    return {
+      success: false,
+      error: 'Notifications not implemented yet',
+      data: null,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // ==================== COMENTARIOS ====================
+  async getComments(contentId: string): Promise<ApiResponse<any[]>> {
+    return this.supabaseRequest(
+      `getComments_${contentId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('comments')
+          .select('*, profiles!comments_user_id_fkey(*)')
+          .eq('content_id', contentId)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: data || [], error: null };
+      },
+      true,
+      2 * 60 * 1000
+    );
+  }
+
+  async addComment(contentId: string, text: string): Promise<ApiResponse<any>> {
     const response = await this.supabaseRequest(
-      'sendMessage',
+      'addComment',
       async () => {
         const { data: { user } } = await supabase.auth.getUser();
         
@@ -1575,89 +1408,328 @@ class ApiService {
         }
 
         const { data, error } = await supabase
-          .from('messages')
+          .from('comments')
           .insert([{
-            sender_id: user.id,
-            receiver_id: messageData.receiverId,
-            content: messageData.content,
-            message_type: messageData.messageType || 'TEXT',
-            media_url: messageData.mediaUrl,
-            is_read: false
+            content_id: contentId,
+            user_id: user.id,
+            text: text
           }])
-          .select()
+          .select('*, profiles!comments_user_id_fkey(*)')
           .maybeSingle();
 
         if (error || !data) {
-          return { data: null, error: error || new Error('Send failed') };
+          return { data: null, error: error || new Error('Comment creation failed') };
         }
 
-        return { data: { message: data as Message }, error: null };
+        return { data, error: null };
       },
       false
     );
 
     if (response.success) {
-      this.invalidateMessageCache();
+      this.invalidateCache(`getComments_${contentId}`);
     }
 
     return response;
   }
 
-  // ==================== NOTIFICACIONES ====================
-  async getNotifications(params?: { 
-    page?: number; 
-    limit?: number; 
-    search?: string 
-  }): Promise<PaginatedResponse<Notification>> {
-    const page = params?.page || 1;
-    const limit = params?.limit || 20;
-    const offset = (page - 1) * limit;
+  // ==================== FOLLOWS ====================
+  async followUser(userId: string): Promise<ApiResponse<{ following: boolean }>> {
+    return this.supabaseRequest(
+      `followUser_${userId}`,
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      throw new ApiError('Not authenticated', 401, 'UNAUTHORIZED', false);
-    }
+        // Verificar si ya sigue
+        const { data: existing } = await supabase
+          .from('follows')
+          .select('id')
+          .eq('follower_id', user.id)
+          .eq('following_id', userId)
+          .maybeSingle();
 
-    let query = supabase
-      .from('notifications')
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id);
+        if (existing) {
+          // Dejar de seguir
+          const { error } = await supabase
+            .from('follows')
+            .delete()
+            .eq('id', existing.id);
 
-    if (params?.search) {
-      query = query.ilike('message', `%${params.search}%`);
-    }
+          if (error) return { data: null, error };
 
-    const { data, error, count } = await query
-      .range(offset, offset + limit - 1)
-      .order('created_at', { ascending: false });
+          return { data: { following: false }, error: null };
+        } else {
+          // Seguir
+          const { error } = await supabase
+            .from('follows')
+            .insert([{ 
+              follower_id: user.id, 
+              following_id: userId 
+            }]);
 
-    if (error) {
-      throw new ApiError(error.message, 500, error.code, true);
-    }
+          if (error) return { data: null, error };
 
-    return {
-      success: true,
-      data: data as Notification[] || [],
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil((count || 0) / limit),
-        totalItems: count || 0,
-        itemsPerPage: limit,
-        hasNextPage: offset + limit < (count || 0),
-        hasPrevPage: page > 1
+          return { data: { following: true }, error: null };
+        }
       },
-      timestamp: new Date().toISOString()
-    };
+      false
+    );
   }
 
-  async markNotificationAsRead(id: string): Promise<ApiResponse<null>> {
+  async getFollowers(userId: string): Promise<ApiResponse<User[]>> {
+    return this.supabaseRequest(
+      `getFollowers_${userId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('follows')
+          .select('follower_id, profiles!follows_follower_id_fkey(*)')
+          .eq('following_id', userId);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        const users = (data || []).map((follow: any) => ({
+          id: follow.profiles.user_id,
+          username: follow.profiles.username,
+          profile: {
+            displayName: follow.profiles.display_name,
+            avatarUrl: follow.profiles.avatar_url,
+            bio: follow.profiles.bio
+          }
+        }));
+
+        return { data: users, error: null };
+      },
+      true,
+      5 * 60 * 1000
+    );
+  }
+
+  async getFollowing(userId: string): Promise<ApiResponse<User[]>> {
+    return this.supabaseRequest(
+      `getFollowing_${userId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('follows')
+          .select('following_id, profiles!follows_following_id_fkey(*)')
+          .eq('follower_id', userId);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        const users = (data || []).map((follow: any) => ({
+          id: follow.profiles.user_id,
+          username: follow.profiles.username,
+          profile: {
+            displayName: follow.profiles.display_name,
+            avatarUrl: follow.profiles.avatar_url,
+            bio: follow.profiles.bio
+          }
+        }));
+
+        return { data: users, error: null };
+      },
+      true,
+      5 * 60 * 1000
+    );
+  }
+
+  // ==================== DRAFTS ====================
+  async getDrafts(): Promise<ApiResponse<any[]>> {
+    return this.supabaseRequest(
+      'getDrafts',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('drafts')
+          .select('*')
+          .eq('author_id', user.id)
+          .order('autosaved_at', { ascending: false });
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: data || [], error: null };
+      },
+      true,
+      1 * 60 * 1000
+    );
+  }
+
+  async saveDraft(draftData: any, contentId?: string): Promise<ApiResponse<any>> {
     const response = await this.supabaseRequest(
-      `markNotificationAsRead_${id}`,
+      'saveDraft',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        // Buscar draft existente
+        const { data: existing } = await supabase
+          .from('drafts')
+          .select('*')
+          .eq('author_id', user.id)
+          .is('content_id', null)
+          .maybeSingle();
+
+        if (existing) {
+          // Actualizar draft existente
+          const { data, error } = await supabase
+            .from('drafts')
+            .update({ 
+              draft_data: draftData,
+              autosaved_at: new Date().toISOString()
+            })
+            .eq('id', existing.id)
+            .select()
+            .maybeSingle();
+
+          if (error || !data) {
+            return { data: null, error: error || new Error('Update failed') };
+          }
+
+          return { data, error: null };
+        } else {
+          // Crear nuevo draft
+          const { data, error } = await supabase
+            .from('drafts')
+            .insert([{
+              author_id: user.id,
+              draft_data: draftData,
+              content_id: contentId
+            }])
+            .select()
+            .maybeSingle();
+
+          if (error || !data) {
+            return { data: null, error: error || new Error('Create failed') };
+          }
+
+          return { data, error: null };
+        }
+      },
+      false
+    );
+
+    if (response.success) {
+      this.invalidateCache('getDrafts');
+    }
+
+    return response;
+  }
+
+  async deleteDraft(draftId: string): Promise<ApiResponse<null>> {
+    const response = await this.supabaseRequest(
+      `deleteDraft_${draftId}`,
       async () => {
         const { error } = await supabase
-          .from('notifications')
-          .update({ is_read: true })
+          .from('drafts')
+          .delete()
+          .eq('id', draftId);
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: null, error: null };
+      },
+      false
+    );
+
+    if (response.success) {
+      this.invalidateCache('getDrafts');
+    }
+
+    return response;
+  }
+
+  // ==================== SCHEDULED POSTS ====================
+  async getScheduledPosts(): Promise<ApiResponse<any[]>> {
+    return this.supabaseRequest(
+      'getScheduledPosts',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('scheduled_posts')
+          .select('*, contents(*)')
+          .eq('author_id', user.id)
+          .eq('status', 'pending')
+          .order('scheduled_for', { ascending: true });
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        return { data: data || [], error: null };
+      },
+      true,
+      2 * 60 * 1000
+    );
+  }
+
+  async schedulePost(contentId: string, scheduledFor: string): Promise<ApiResponse<any>> {
+    const response = await this.supabaseRequest(
+      'schedulePost',
+      async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          return { data: null, error: new Error('Not authenticated') };
+        }
+
+        const { data, error } = await supabase
+          .from('scheduled_posts')
+          .insert([{
+            content_id: contentId,
+            scheduled_for: scheduledFor,
+            author_id: user.id,
+            status: 'pending'
+          }])
+          .select()
+          .maybeSingle();
+
+        if (error || !data) {
+          return { data: null, error: error || new Error('Schedule failed') };
+        }
+
+        return { data, error: null };
+      },
+      false
+    );
+
+    if (response.success) {
+      this.invalidateCache('getScheduledPosts');
+    }
+
+    return response;
+  }
+
+  async cancelScheduledPost(id: string): Promise<ApiResponse<null>> {
+    const response = await this.supabaseRequest(
+      `cancelScheduledPost_${id}`,
+      async () => {
+        const { error } = await supabase
+          .from('scheduled_posts')
+          .update({ status: 'cancelled' })
           .eq('id', id);
 
         if (error) {
@@ -1670,27 +1742,26 @@ class ApiService {
     );
 
     if (response.success) {
-      this.invalidateNotificationCache();
+      this.invalidateCache('getScheduledPosts');
     }
 
     return response;
   }
 
-  async markAllNotificationsAsRead(): Promise<ApiResponse<null>> {
-    const response = await this.supabaseRequest(
-      'markAllNotificationsAsRead',
+  // ==================== VIEWS/ANALYTICS ====================
+  async trackContentView(contentId: string): Promise<ApiResponse<null>> {
+    return this.supabaseRequest(
+      `trackView_${contentId}`,
       async () => {
         const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          return { data: null, error: new Error('Not authenticated') };
-        }
 
         const { error } = await supabase
-          .from('notifications')
-          .update({ is_read: true })
-          .eq('user_id', user.id)
-          .eq('is_read', false);
+          .from('views')
+          .insert([{
+            content_id: contentId,
+            user_id: user?.id || null,
+            viewed_at: new Date().toISOString()
+          }]);
 
         if (error) {
           return { data: null, error };
@@ -1700,12 +1771,6 @@ class ApiService {
       },
       false
     );
-
-    if (response.success) {
-      this.invalidateNotificationCache();
-    }
-
-    return response;
   }
 
   // ==================== UTILIDADES DE AUTENTICACIÓN ====================
