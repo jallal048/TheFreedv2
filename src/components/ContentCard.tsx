@@ -1,5 +1,6 @@
-// Componente de tarjeta de contenido memoizado para evitar re-renders innecesarios
+// Componente de tarjeta de contenido memoizado con link a perfil del autor
 import { memo } from 'react';
+import { Link } from 'react-router-dom';
 import { Heart, MessageCircle, Eye, Share, PlayCircle, Image as ImageIcon, FileText, Music } from 'lucide-react';
 import { Content } from '../types';
 
@@ -10,14 +11,12 @@ interface ContentCardProps {
   showMetadata?: boolean;
 }
 
-// Memoizar el componente de tarjeta de contenido
 const ContentCard: React.FC<ContentCardProps> = memo(({ 
   content, 
   viewMode, 
   onInteraction, 
   showMetadata = true 
 }) => {
-  // Memoizar iconos de tipo de contenido
   const contentIcons = {
     VIDEO: PlayCircle,
     IMAGE: ImageIcon,
@@ -35,7 +34,6 @@ const ContentCard: React.FC<ContentCardProps> = memo(({
     FILE: 'text-gray-500'
   }[content.contentType as keyof typeof contentIcons] || 'text-gray-500';
 
-  // Memoizar el manejo de interacciones para evitar re-renders
   const handleClick = () => onInteraction(content, 'view');
   
   const handleLike = (e: React.MouseEvent) => {
@@ -78,6 +76,24 @@ const ContentCard: React.FC<ContentCardProps> = memo(({
           <p className="text-sm text-gray-600 mb-3 line-clamp-2">
             {content.description}
           </p>
+          
+          {/* Link al perfil del autor */}
+          {content.creatorId && (
+            <Link
+              to={`/public/${content.creatorId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center space-x-2 mb-3 hover:bg-gray-50 rounded-lg p-1 -ml-1 transition-colors"
+            >
+              <div className="w-6 h-6 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs font-medium">
+                  {content.creatorUsername?.charAt(0)?.toUpperCase() || 'U'}
+                </span>
+              </div>
+              <span className="text-sm text-gray-600 hover:text-blue-600 transition-colors">
+                @{content.creatorUsername || 'Unknown'}
+              </span>
+            </Link>
+          )}
           
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4 text-sm text-gray-500">
@@ -158,21 +174,28 @@ const ContentCard: React.FC<ContentCardProps> = memo(({
           {content.title}
         </h3>
         
-        <div className="flex items-center space-x-2 mb-3">
-          <div className="w-6 h-6 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-            <span className="text-white text-xs font-medium">
-              {content.creatorUsername?.charAt(0)?.toUpperCase() || 'U'}
+        {/* Link al perfil del autor */}
+        {content.creatorId && (
+          <Link
+            to={`/public/${content.creatorId}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center space-x-2 mb-3 hover:bg-gray-50 rounded-lg p-1 -ml-1 transition-colors"
+          >
+            <div className="w-6 h-6 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+              <span className="text-white text-xs font-medium">
+                {content.creatorUsername?.charAt(0)?.toUpperCase() || 'U'}
+              </span>
+            </div>
+            <span className="text-sm text-gray-600 hover:text-blue-600 transition-colors">
+              @{content.creatorUsername || 'Unknown'}
             </span>
-          </div>
-          <span className="text-sm text-gray-600">
-            @{content.creatorUsername || 'Unknown'}
-          </span>
-          {showMetadata && content.contentType && (
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-              {content.contentType}
-            </span>
-          )}
-        </div>
+            {showMetadata && content.contentType && (
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                {content.contentType}
+              </span>
+            )}
+          </Link>
+        )}
         
         <div className="flex items-center justify-between text-sm text-gray-500">
           <div className="flex items-center space-x-4">
