@@ -1,4 +1,4 @@
-// Servicio de autenticación usando Supabase Auth y crea perfil manualmente
+// Servicio de autenticación usando Supabase Auth y crea perfil manualmente si no existe (sin duplicados)
 import { supabase } from './supabase';
 import { User } from '../types';
 
@@ -28,7 +28,7 @@ export class AuthService {
     }
   }
 
-  // Registro con Supabase + perfil manual
+  // Registro con Supabase: solo crea perfil si no existe (previene duplicados)
   static async register(email: string, password: string, userData?: any) {
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -38,33 +38,40 @@ export class AuthService {
       });
       if (error) throw new Error(error.message);
 
-      // Crear perfil manualmente en tabla public.profiles
+      // Crear perfil solo si no existe para ese user_id
       const user = data.user;
       if (user) {
-        const profileInsert = {
-          user_id: user.id,
-          username: userData?.username || user.email.split('@')[0],
-          first_name: userData?.firstName || '',
-          last_name: userData?.lastName || '',
-          display_name: userData?.displayName || userData?.username || user.email.split('@')[0],
-          bio: '',
-          avatar_url: '',
-          banner_url: '',
-          website: '',
-          social_links: {},
-          categories: userData?.categories || ['general'],
-          is_verified: false,
-          is_public: true,
-          is_active: true,
-          follower_count: 0,
-          monthly_price: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        const { error: errProfile } = await supabase.from('profiles').insert([profileInsert]);
-        if (errProfile) {
-          console.warn('Error al crear perfil tras registro:', errProfile.message);
-          return { success: false, error: 'Registro: usuario creado pero perfil falló: ' + errProfile.message };
+        const { data: existing } = await supabase
+          .from('profiles')
+          .select('user_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!existing) {
+          const profileInsert = {
+            user_id: user.id,
+            username: userData?.username || user.email.split('@')[0],
+            first_name: userData?.firstName || '',
+            last_name: userData?.lastName || '',
+            display_name: userData?.displayName || userData?.username || user.email.split('@')[0],
+            bio: '',
+            avatar_url: '',
+            banner_url: '',
+            website: '',
+            social_links: {},
+            categories: userData?.categories || ['general'],
+            is_verified: false,
+            is_public: true,
+            is_active: true,
+            follower_count: 0,
+            monthly_price: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          const { error: errProfile } = await supabase.from('profiles').insert([profileInsert]);
+          if (errProfile) {
+            console.warn('Error al crear perfil tras registro:', errProfile.message);
+            return { success: false, error: 'Registro: usuario creado pero perfil falló: ' + errProfile.message };
+          }
         }
       }
 
