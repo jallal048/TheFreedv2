@@ -23,7 +23,7 @@ export class AuthService {
       console.error('Error de login:', error);
       return {
         success: false,
-        error: error.message || 'Error de autenticación'
+        error: error.message || 'Error de autenticaci\u00f3n'
       };
     }
   }
@@ -38,9 +38,9 @@ export class AuthService {
       });
       if (error) throw new Error(error.message);
 
-      // Crear perfil solo si no existe para ese user_id
       const user = data.user;
       if (user) {
+        // Crear perfil si no existe
         const { data: existing } = await supabase
           .from('profiles')
           .select('user_id')
@@ -70,8 +70,13 @@ export class AuthService {
           const { error: errProfile } = await supabase.from('profiles').insert([profileInsert]);
           if (errProfile) {
             console.warn('Error al crear perfil tras registro:', errProfile.message);
-            return { success: false, error: 'Registro: usuario creado pero perfil falló: ' + errProfile.message };
+            return { success: false, error: 'Registro: usuario creado pero perfil fall\u0000: ' + errProfile.message };
           }
+        }
+
+        // Cambio para desarrollo: marcar email como verificado autom\u0000ticamente
+        if (process.env.NODE_ENV === 'development') {
+          await supabase.from('profiles').update({ is_verified: true }).eq('user_id', user.id);
         }
       }
 
